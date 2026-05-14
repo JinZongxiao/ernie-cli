@@ -1,0 +1,136 @@
+"""Rich-based rendering components for ErnieCLI."""
+from __future__ import annotations
+
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+from rich.rule import Rule
+from rich import box
+
+from erniecli.tui.theme import (
+    BAIDU_BLUE, BAIDU_DARK, BAIDU_RED, BAIDU_GOLD,
+    BAIDU_GRAY, BAIDU_GREEN, WHITE, DIM,
+)
+
+_console = Console()
+
+
+def get_console() -> Console:
+    return _console
+
+
+def render_thinking(reasoning: str) -> None:
+    if not reasoning.strip():
+        return
+    lines = reasoning.strip().splitlines()
+    display = "\n".join(f"  • {l}" for l in lines if l.strip())
+    panel = Panel(
+        Text(display, style=f"dim {BAIDU_GRAY}"),
+        title=f"[{BAIDU_BLUE}]思考过程[/{BAIDU_BLUE}]",
+        border_style=BAIDU_DARK,
+        box=box.ROUNDED,
+        expand=False,
+    )
+    _console.print(panel)
+
+
+def render_sources(sources: list[dict], search_tokens: int = 0) -> None:
+    """Render source citation cards after a search-powered response."""
+    if not sources:
+        return
+    t = Table(box=box.SIMPLE, show_header=False, padding=(0, 1), expand=False)
+    t.add_column("site", style=f"bold {BAIDU_GOLD}", no_wrap=True)
+    t.add_column("url",  style=f"dim {BAIDU_GRAY}",  overflow="fold")
+    for s in sources:
+        t.add_row(s["name"], s["url"])
+    hint = f"  [{BAIDU_GOLD}]🔍 参考来源[/{BAIDU_GOLD}]"
+    if search_tokens:
+        hint += f"  [dim]({search_tokens:,} search tokens)[/dim]"
+    _console.print(hint)
+    _console.print(t)
+
+
+def render_tool_call(tool_name: str, args: dict) -> None:
+    args_text = "\n".join(f"  {k}: {v}" for k, v in args.items())
+    icon = "🔍" if tool_name == "baidu_search" else "⚙"
+    panel = Panel(
+        Text(args_text or "(no args)", style=WHITE),
+        title=f"[{BAIDU_BLUE}]{icon} 工具调用[/{BAIDU_BLUE}]  [{BAIDU_GOLD}]{tool_name}[/{BAIDU_GOLD}]",
+        border_style=BAIDU_BLUE,
+        box=box.ROUNDED,
+        expand=False,
+    )
+    _console.print(panel)
+
+
+def render_tool_result(tool_name: str, output: str, success: bool = True,
+                       sources: list[dict] | None = None) -> None:
+    color = BAIDU_GREEN if success else BAIDU_RED
+    icon  = "✓" if success else "✗"
+    truncated = output[:2000] + ("\n…(truncated)" if len(output) > 2000 else "")
+    panel = Panel(
+        Text(truncated, style=f"dim {WHITE}"),
+        title=f"[{color}]{icon} {tool_name}[/{color}]",
+        border_style=color,
+        box=box.ROUNDED,
+        expand=False,
+    )
+    _console.print(panel)
+    if sources:
+        render_sources(sources)
+
+
+def render_permission_prompt(level: str, command: str) -> None:
+    if level == "WRITE":
+        _console.print(f"\n[{BAIDU_GOLD}]⚠ 写操作[/{BAIDU_GOLD}]  [{WHITE}]{command}[/{WHITE}]")
+        _console.print(f"[{BAIDU_GRAY}]按 Enter 确认，Ctrl+C 取消[/{BAIDU_GRAY}]")
+    elif level == "DANGEROUS":
+        _console.print(f"\n[{BAIDU_RED}]⛔ 危险操作[/{BAIDU_RED}]  [{WHITE}]{command}[/{WHITE}]")
+        _console.print(f"[{BAIDU_RED}]输入 [bold]yes[/bold] 继续，其他任意键取消[/{BAIDU_RED}]")
+
+
+def render_markdown(text: str) -> None:
+    _console.print(Markdown(text, code_theme="monokai"))
+
+
+def render_error(msg: str) -> None:
+    _console.print(f"[{BAIDU_RED}]错误：{msg}[/{BAIDU_RED}]")
+
+
+def render_info(msg: str) -> None:
+    _console.print(f"[{BAIDU_GRAY}]{msg}[/{BAIDU_GRAY}]")
+
+
+def render_success(msg: str) -> None:
+    _console.print(f"[{BAIDU_GREEN}]{msg}[/{BAIDU_GREEN}]")
+
+
+def render_separator() -> None:
+    _console.print(Rule(style=DIM))
+
+
+class StreamRenderer:
+    def __init__(self):
+        self._buf = ""
+        self._reasoning_buf = ""
+
+    def feed_reasoning(self, chunk: str) -> None:
+        self._reasoning_buf += chunk
+        _console.print(chunk, end="", style=f"dim {BAIDU_GRAY}", highlight=False)
+
+    def end_reasoning(self) -> None:
+        if self._reasoning_buf:
+            _console.print()
+            render_thinking(self._reasoning_buf)
+            self._reasoning_buf = ""
+
+    def feed_content(self, chunk: str) -> None:
+        self._buf += chunk
+        _console.print(chunk, end="", highlight=False)
+
+    def finish(self, sources: list[dict] | None = None, search_tokens: int = 0) -> None:
+        _console.print()
+        if sources:
+            render_sources(sources, search_tokens)

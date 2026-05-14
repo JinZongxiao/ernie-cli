@@ -1,0 +1,72 @@
+"""Configuration loading: env > ~/.ernie/config.yaml > defaults."""
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Optional
+
+import yaml
+
+
+_CONFIG_PATH = Path.home() / ".ernie" / "config.yaml"
+_DEFAULT_MODEL = "ernie-5.1"
+_DEFAULT_BASE_URL = "https://aistudio.baidu.com/llm/lmapi/v3"
+
+
+@dataclass
+class Config:
+    api_key: str = ""
+    base_url: str = _DEFAULT_BASE_URL
+    model: str = _DEFAULT_MODEL
+    max_tokens: int = 8192
+    temperature: float = 0.7
+    search_enabled: bool = False
+    history_path: Path = field(default_factory=lambda: Path.home() / ".ernie" / "history.json")
+    timeout: int = 120
+
+    def validate(self) -> None:
+        if not self.api_key:
+            raise SystemExit(
+                "[red]错误：未找到 ERNIE_API_KEY。\n"
+                "请设置环境变量：export ERNIE_API_KEY=<your_token>[/red]"
+            )
+
+
+def load_config(config_path: Optional[Path] = None) -> Config:
+    cfg = Config()
+
+    path = config_path or _CONFIG_PATH
+    if path.exists():
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+        _apply_yaml(cfg, data)
+
+    # env vars always win
+    if key := os.environ.get("ERNIE_API_KEY"):
+        cfg.api_key = key
+    if url := os.environ.get("ERNIE_BASE_URL"):
+        cfg.base_url = url
+    if model := os.environ.get("ERNIE_MODEL"):
+        cfg.model = model
+
+    cfg.validate()
+    return cfg
+
+
+def _apply_yaml(cfg: Config, data: dict) -> None:
+    mapping = {
+        "api_key":       "api_key",
+        "base_url":      "base_url",
+        "model":         "model",
+        "max_tokens":    "max_tokens",
+        "temperature":   "temperature",
+        "search":        "search_enabled",
+        "history_path":  None,  # handled below
+        "timeout":       "timeout",
+    }
+    for yaml_key, attr in mapping.items():
+        if yaml_key in data and attr:
+            setattr(cfg, attr, data[yaml_key])
+    if "history_path" in data:
+        cfg.history_path = Path(data["history_path"]).expanduser()

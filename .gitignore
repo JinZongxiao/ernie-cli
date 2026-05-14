@@ -1,0 +1,39 @@
+# 依赖缓存
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# 打包产物
+*.egg-info/
+dist/
+build/
+*.egg
+
+# 环境
+.env
+.venv
+venv/
+env/
+
+# 配置（含密钥）
+.env.local
+config.local.yaml
+
+# 用户数据
+~/.ernie/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 测试覆盖率
+.coverage
+htmlcov/

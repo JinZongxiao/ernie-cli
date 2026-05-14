@@ -1,0 +1,10 @@
+"""Baidu / Ernie brand color constants."""
+
+BAIDU_BLUE  = "#2932E1"
+BAIDU_DARK  = "#1A1F6E"
+BAIDU_RED   = "#E02020"
+BAIDU_GOLD  = "#FFB400"
+BAIDU_GRAY  = "#8A8A8A"
+BAIDU_GREEN = "#00C853"
+WHITE       = "#F0F0F0"
+DIM         = "#555555"
