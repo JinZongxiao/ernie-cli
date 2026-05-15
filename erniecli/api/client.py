@@ -70,7 +70,7 @@ class StreamResult:
     tool_calls: list[dict] = field(default_factory=list)
     finish_reason: Optional[str] = None
     search_tokens: int = 0
-    sources: list[dict] = field(default_factory=list)   # extracted from content
+    sources: list[dict] = field(default_factory=list)
 
 
 class ErnieClient:
@@ -97,11 +97,14 @@ class ErnieClient:
         messages: list[dict],
         tools: Optional[list[dict]] = None,
         search_enabled: bool = False,
+        mcp_servers: Optional[list[dict]] = None,
     ) -> Generator[tuple[str, str], None, StreamResult]:
-        """Stream chat. Yields (chunk_type, text). Returns StreamResult."""
+        """Stream chat. Yields (chunk_type, text). Returns StreamResult via StopIteration.value."""
         extra_body: dict = {}
         if search_enabled:
             extra_body["web_search"] = {"enable": True}
+        if mcp_servers:
+            extra_body["mcp_servers"] = mcp_servers
 
         kwargs: dict = dict(
             model=self.model,
@@ -153,7 +156,6 @@ class ErnieClient:
             if choice.finish_reason:
                 result.finish_reason = choice.finish_reason
 
-            # capture search_tokens from usage on final chunk
             if hasattr(chunk, "usage") and chunk.usage:
                 pt = chunk.usage.prompt_tokens_details
                 if pt and hasattr(pt, "search_tokens") and pt.search_tokens:
@@ -167,15 +169,31 @@ class ErnieClient:
                 args = {"raw": acc.arguments}
             result.tool_calls.append({"id": acc.id, "name": acc.name, "args": args})
 
-        # extract source URLs from combined content
         combined = result.content + "\n" + result.reasoning
         result.sources = extract_sources(combined)
 
         return result
 
+    def chat(
+        self,
+        messages: list[dict],
+        tools: Optional[list[dict]] = None,
+        search_enabled: bool = False,
+        mcp_servers: Optional[list[dict]] = None,
+    ) -> StreamResult:
+        """Non-streaming convenience wrapper."""
+        result = StreamResult()
+        gen = self.stream_chat(messages, tools=tools,
+                               search_enabled=search_enabled, mcp_servers=mcp_servers)
+        try:
+            while True:
+                next(gen)
+        except StopIteration as exc:
+            result = exc.value
+        return result
+
     def search(self, query: str) -> tuple[str, list[dict]]:
-        """Focused search call for the baidu_search tool.
-        Returns (answer_text, sources)."""
+        """Focused search call for the baidu_search tool."""
         resp = self._client.chat.completions.create(
             model=self.model,
             messages=[
@@ -190,138 +208,3 @@ class ErnieClient:
         reasoning = getattr(resp.choices[0].message, "reasoning_content", "") or ""
         sources = extract_sources(text + "\n" + reasoning)
         return text, sources
-
-    def chat(
-        self,
-        messages: list[dict],
-        tools: Optional[list[dict]] = None,
-        search_enabled: bool = False,
-    ) -> StreamResult:
-        result = StreamResult()
-        gen = self.stream_chat(messages, tools=tools, search_enabled=search_enabled)
-        try:
-            while True:
-                next(gen)
-        except StopIteration as exc:
-            result = exc.value
-        return result
-
-    def __init__(self, api_key: str, base_url: str, model: str,
-                 max_tokens: int = 8192, temperature: float = 0.7, timeout: int = 120):
-        self.model = model
-        self.max_tokens = max_tokens
-        self.temperature = temperature
-        self._client = OpenAI(
-            api_key=api_key,
-            base_url=base_url,
-            timeout=timeout,
-        )
-
-    def list_models(self) -> list[str]:
-        """Return model IDs available under the current API key."""
-        try:
-            models = self._client.models.list()
-            return sorted(m.id for m in models.data)
-        except Exception:
-            return []
-
-    def stream_chat(
-        self,
-        messages: list[dict],
-        tools: Optional[list[dict]] = None,
-        search_enabled: bool = False,
-    ) -> Generator[tuple[str, str], None, StreamResult]:
-        """Stream the chat response.
-
-        Yields (chunk_type, chunk_text) tuples where chunk_type is:
-          "content"   — normal response token
-          "reasoning" — thinking chain token
-
-        Returns a StreamResult via StopIteration.value (use `yield from` or
-        loop manually and catch StopIteration).
-        """
-        extra_body: dict = {}
-        if search_enabled:
-            extra_body["web_search"] = {"enable": True}
-
-        kwargs: dict = dict(
-            model=self.model,
-            messages=messages,
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-            stream=True,
-        )
-        if tools:
-            kwargs["tools"] = tools
-            kwargs["tool_choice"] = "auto"
-        if extra_body:
-            kwargs["extra_body"] = extra_body
-
-        stream = self._client.chat.completions.create(**kwargs)
-
-        result = StreamResult()
-        # tool call accumulator keyed by index
-        tc_accum: dict[int, ToolCallAccumulator] = {}
-
-        for chunk in stream:
-            delta = chunk.choices[0].delta if chunk.choices else None
-            if delta is None:
-                continue
-
-            # reasoning_content is an Ernie-specific extra field
-            reasoning_delta = getattr(delta, "reasoning_content", None)
-            if reasoning_delta:
-                result.reasoning += reasoning_delta
-                yield "reasoning", reasoning_delta
-
-            if delta.content:
-                result.content += delta.content
-                yield "content", delta.content
-
-            if delta.tool_calls:
-                for tc_delta in delta.tool_calls:
-                    idx = tc_delta.index
-                    if idx not in tc_accum:
-                        tc_accum[idx] = ToolCallAccumulator(index=idx)
-                    acc = tc_accum[idx]
-                    if tc_delta.id:
-                        acc.id = tc_delta.id
-                    if tc_delta.function:
-                        if tc_delta.function.name:
-                            acc.name += tc_delta.function.name
-                        if tc_delta.function.arguments:
-                            acc.arguments += tc_delta.function.arguments
-
-            if chunk.choices[0].finish_reason:
-                result.finish_reason = chunk.choices[0].finish_reason
-
-        # finalise tool calls
-        for idx in sorted(tc_accum):
-            acc = tc_accum[idx]
-            try:
-                args = json.loads(acc.arguments) if acc.arguments else {}
-            except json.JSONDecodeError:
-                args = {"raw": acc.arguments}
-            result.tool_calls.append({
-                "id":   acc.id,
-                "name": acc.name,
-                "args": args,
-            })
-
-        return result
-
-    def chat(
-        self,
-        messages: list[dict],
-        tools: Optional[list[dict]] = None,
-        search_enabled: bool = False,
-    ) -> StreamResult:
-        """Non-streaming convenience wrapper (collects full stream)."""
-        result = StreamResult()
-        gen = self.stream_chat(messages, tools=tools, search_enabled=search_enabled)
-        try:
-            while True:
-                next(gen)
-        except StopIteration as exc:
-            result = exc.value
-        return result

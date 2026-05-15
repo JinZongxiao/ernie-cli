@@ -295,6 +295,13 @@ max_tokens: 8192
 temperature: 0.7
 search: false           # 默认不开搜索
 timeout: 120            # 请求超时秒数
+
+# MCP server 列表（可选）
+# Ernie 后端会代理连接这些 server，不需要本地跑 MCP 进程
+mcp_servers:
+  - type: sse
+    url: https://your-mcp-server.example.com/sse
+    server_label: my_tools
 ```
 
 ---

@@ -3,13 +3,19 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
+import termios
+import tty
 from pathlib import Path
 from typing import Optional
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-from prompt_toolkit.completion import NestedCompleter, PathCompleter, merge_completers
+from prompt_toolkit.completion import (
+    Completer, Completion, PathCompleter
+)
+from prompt_toolkit.document import Document
 from prompt_toolkit.styles import Style
 from prompt_toolkit.formatted_text import HTML
 from rich.console import Console
@@ -30,6 +36,157 @@ _KNOWN_MODELS = {
     "ernie-lite": None,
     "ernie-speed": None,
     "ernie-character": None,
+}
+
+# Static path completers for commands that accept file/directory arguments
+_PATH_COMPLETER = PathCompleter()
+_DIR_COMPLETER  = PathCompleter(only_directories=True)
+
+
+def _read_one_key() -> str:
+    """Read a single keypress without Enter. Returns 'up', 'down', or ''."""
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        ch = sys.stdin.read(1)
+        if ch == "\x1b":
+            ch2 = sys.stdin.read(1)
+            if ch2 == "[":
+                ch3 = sys.stdin.read(1)
+                if ch3 == "A":
+                    return "up"
+                if ch3 == "B":
+                    return "down"
+        return ""
+    except Exception:
+        return ""
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+class _SlashCompleter(Completer):
+    """Dynamic slash-command completer.
+
+    Delegates to NestedCompleter for static sub-commands, and injects
+    dynamic choices for /model (live model list) and /mcp remove (current labels).
+    Only activates when the input line starts with '/'.
+    """
+
+    def __init__(self, repl: "REPL"):
+        self._repl = repl
+
+    def get_completions(self, document: Document, complete_event):
+        text = document.text_before_cursor
+        if not text.startswith("/"):
+            return
+
+        parts = text.split()
+        verb  = parts[0].lower() if parts else ""
+        nargs = len(parts)
+        # trailing space means user finished the last token, next arg starts
+        trailing_space = text.endswith(" ")
+
+        # ── first token: complete the command itself ──────────────────────────
+        if nargs == 0 or (nargs == 1 and not trailing_space):
+            prefix = verb
+            for cmd in _ALL_CMDS:
+                if cmd.startswith(prefix):
+                    yield Completion(cmd, start_position=-len(prefix),
+                                     display_meta=_CMD_META.get(cmd, ""))
+            return
+
+        # ── second token: sub-commands ────────────────────────────────────────
+        if verb == "/search":
+            if nargs == 1 or (nargs == 2 and not trailing_space):
+                cur = parts[1] if nargs == 2 else ""
+                for s in ("on", "off"):
+                    if s.startswith(cur):
+                        yield Completion(s, start_position=-len(cur))
+            return
+
+        if verb == "/memory":
+            if nargs == 1 or (nargs == 2 and not trailing_space):
+                cur = parts[1] if nargs == 2 else ""
+                for s in ("add", "clear"):
+                    if s.startswith(cur):
+                        yield Completion(s, start_position=-len(cur))
+            return
+
+        if verb == "/mcp":
+            if nargs == 1 or (nargs == 2 and not trailing_space):
+                cur = parts[1] if nargs == 2 else ""
+                for s in ("add", "remove"):
+                    if s.startswith(cur):
+                        yield Completion(s, start_position=-len(cur))
+                return
+            # /mcp remove <label> — complete label dynamically
+            if nargs >= 2 and parts[1].lower() == "remove":
+                if nargs == 2 or (nargs == 3 and not trailing_space):
+                    cur = parts[2] if nargs == 3 else ""
+                    for srv in self._repl.agent.mcp_servers:
+                        label = srv.get("server_label", "")
+                        if label.startswith(cur):
+                            yield Completion(label, start_position=-len(cur))
+                return
+
+        if verb == "/model":
+            if nargs == 1 or (nargs == 2 and not trailing_space):
+                cur = parts[1] if nargs == 2 else ""
+                # try live list first, fall back to known list
+                try:
+                    live = self._repl.agent.client.list_models()
+                    models = live if live else list(_KNOWN_MODELS)
+                except Exception:
+                    models = list(_KNOWN_MODELS)
+                for m in models:
+                    if m.startswith(cur):
+                        yield Completion(m, start_position=-len(cur))
+            return
+
+        # ── path-completing commands ──────────────────────────────────────────
+        if verb in ("/add", "/img", "/review"):
+            path_doc = Document(parts[-1] if nargs > 1 and not trailing_space else "")
+            yield from _PATH_COMPLETER.get_completions(path_doc, complete_event)
+            return
+
+        if verb == "/cd":
+            path_doc = Document(parts[-1] if nargs > 1 and not trailing_space else "")
+            yield from _DIR_COMPLETER.get_completions(path_doc, complete_event)
+            return
+
+
+# All top-level slash commands (for first-token completion)
+_ALL_CMDS = [
+    "/help", "/clear", "/compact", "/history", "/resume",
+    "/add", "/img", "/model", "/search", "/review", "/run", "/cd",
+    "/init", "/status", "/cost", "/memory", "/mcp", "/doctor",
+    "/export-dataset", "/quit", "/exit",
+]
+
+# Short description shown in completion menu
+_CMD_META: dict[str, str] = {
+    "/help":           "显示帮助",
+    "/clear":          "清空对话",
+    "/compact":        "压缩历史",
+    "/history":        "查看历史",
+    "/resume":         "恢复会话",
+    "/add":            "注入文件/目录",
+    "/img":            "附加图片",
+    "/model":          "切换模型",
+    "/search":         "开关搜索",
+    "/review":         "代码 Review",
+    "/run":            "执行命令",
+    "/cd":             "切换目录",
+    "/init":           "生成 ERNIE.md",
+    "/status":         "会话状态",
+    "/cost":           "费用估算",
+    "/memory":         "持久记忆",
+    "/mcp":            "MCP servers",
+    "/doctor":         "诊断环境",
+    "/export-dataset": "导出 DPO 数据集",
+    "/quit":           "退出",
+    "/exit":    "退出",
 }
 
 _PROMPT_STYLE = Style.from_dict({
@@ -65,39 +222,23 @@ _COMMANDS_HELP = [
         ("/status",         "显示当前会话状态（模型、token 用量等）"),
         ("/cost",           "估算本次会话 token 用量与费用"),
     ]),
+    ("MCP", [
+        ("/mcp",            "列出已连接的 MCP server"),
+        ("/mcp add <label> <url>",  "添加 SSE 类型的 MCP server"),
+        ("/mcp remove <label>",     "移除 MCP server"),
+    ]),
     ("记忆", [
         ("/memory",         "查看持久记忆（注入每次对话的系统提示）"),
         ("/memory add <text>", "追加一条持久记忆"),
         ("/memory clear",   "清空持久记忆"),
     ]),
     ("系统", [
-        ("/doctor",         "检查环境：API 连通性、配置、依赖"),
-        ("/help",           "显示此帮助"),
-        ("/quit / /exit",   "退出 ErnieCLI"),
+        ("/doctor",              "检查环境：API 连通性、配置、依赖"),
+        ("/export-dataset [path]","导出 DPO 训练数据集（基于历史评分）"),
+        ("/help",                "显示此帮助"),
+        ("/quit / /exit",        "退出 ErnieCLI"),
     ]),
 ]
-
-_SLASH_COMPLETER = NestedCompleter.from_nested_dict({
-    "/help":    None,
-    "/clear":   None,
-    "/compact": None,
-    "/history": None,
-    "/resume":  None,
-    "/add":     PathCompleter(),
-    "/img":     PathCompleter(),
-    "/model":   _KNOWN_MODELS,
-    "/search":  {"on": None, "off": None},
-    "/review":  PathCompleter(),
-    "/run":     None,
-    "/cd":      PathCompleter(only_directories=True),
-    "/init":    None,
-    "/status":  None,
-    "/cost":    None,
-    "/memory":  {"add": None, "clear": None},
-    "/doctor":  None,
-    "/quit":    None,
-    "/exit":    None,
-})
 
 
 def _count_tokens(messages: list[dict]) -> int:
@@ -122,8 +263,8 @@ class REPL:
         self._session: PromptSession = PromptSession(
             history=FileHistory(str(_HISTORY_FILE)),
             auto_suggest=AutoSuggestFromHistory(),
-            completer=_SLASH_COMPLETER,
-            complete_while_typing=False,  # Tab triggers completion
+            completer=_SlashCompleter(self),
+            complete_while_typing=False,  # only Tab triggers completion
             style=_PROMPT_STYLE,
         )
         self._load_memory()
@@ -150,6 +291,7 @@ class REPL:
                 continue
             except EOFError:
                 renderer.render_info("\n再见！")
+                self._run_session_score()
                 break
 
             if not user_input:
@@ -157,6 +299,7 @@ class REPL:
 
             if user_input.startswith("/"):
                 if not self._handle_slash(user_input):
+                    self._run_session_score()
                     break
             else:
                 self._run_turn(user_input)
@@ -177,13 +320,65 @@ class REPL:
         image = self._pending_image
         self._pending_image = None
         renderer.render_separator()
+        interrupted = False
         try:
             self.agent.run_turn(text, image_path=image)
         except KeyboardInterrupt:
             renderer.render_info("\n已中断。")
+            interrupted = True
+            self.agent.mark_last_turn_interrupted()
         except Exception as exc:
             renderer.render_error(str(exc))
         renderer.render_separator()
+
+        # show turn feedback hint (skip if interrupted)
+        if not interrupted and self.agent._turns:
+            renderer.render_turn_feedback_hint()
+            label = _read_one_key()
+            if label in ("up", "down"):
+                self.agent.set_last_turn_label(label)
+                renderer.render_turn_label_result(label)
+            else:
+                renderer.render_turn_label_result("")   # just newline
+
+    # ── session scoring (called on exit) ─────────────────────────────────────
+
+    def _run_session_score(self) -> None:
+        """Interactive multi-dim session scoring. Skippable with Enter."""
+        if not self.agent._turns:
+            return
+
+        from erniecli.agent.loop import SessionScore
+        renderer.render_session_score_header()
+
+        score = SessionScore()
+
+        def _ask(prompt: str, valid: set) -> str:
+            renderer.render_session_score_question(prompt)
+            try:
+                ans = input().strip().lower()
+            except (KeyboardInterrupt, EOFError):
+                ans = ""
+            return ans if ans in valid else ""
+
+        v = _ask("① 解决问题了吗？ [y/n/?] ", {"y", "n", "?"})
+        score.solved = v
+
+        v = _ask("② 废话多不多？ [1=少 2=刚好 3=多] ", {"1", "2", "3"})
+        score.verbose = int(v) if v else 0
+
+        v = _ask("③ 工具调用靠谱？ [1=准 2=一般 3=乱] ", {"1", "2", "3"})
+        score.tool_quality = int(v) if v else 0
+
+        renderer.render_session_score_question("④ 一句话吐槽（直接 Enter 跳过）: ")
+        try:
+            score.comment = input().strip()
+        except (KeyboardInterrupt, EOFError):
+            score.comment = ""
+
+        self.agent.session_score = score
+        self.agent.save_session()
+        renderer.render_success("已记录，谢谢！数据会帮助我变得更好 🙏")
 
     # ── slash command dispatcher ──────────────────────────────────────────────
 
@@ -210,7 +405,9 @@ class REPL:
             "/status":  self._cmd_status,
             "/cost":    self._cmd_cost,
             "/memory":  self._cmd_memory,
+            "/mcp":     self._cmd_mcp,
             "/doctor":  self._cmd_doctor,
+            "/export-dataset": self._cmd_export_dataset,
         }
 
         if verb in ("/quit", "/exit"):
@@ -486,6 +683,64 @@ class REPL:
             return
 
         renderer.render_error("用法：/memory  /memory add <内容>  /memory clear")
+
+    def _cmd_mcp(self, arg: str) -> None:
+        servers = self.agent.mcp_servers
+        parts = arg.split(None, 2)
+        sub = parts[0].lower() if parts else ""
+
+        if not sub:
+            # list
+            if not servers:
+                renderer.render_info("当前没有配置 MCP server。用 /mcp add <label> <url> 添加。")
+                return
+            renderer.render_info(f"已配置 {len(servers)} 个 MCP server：")
+            for s in servers:
+                label = s.get("server_label", "?")
+                stype = s.get("type", "?")
+                addr  = s.get("url") or s.get("command", "?")
+                renderer.render_info(f"  [{stype}] {label}  →  {addr}")
+            return
+
+        if sub == "add":
+            # /mcp add <label> <url>
+            if len(parts) < 3:
+                renderer.render_error("用法：/mcp add <label> <url>")
+                return
+            label, url = parts[1], parts[2]
+            # remove existing with same label first
+            self.agent.mcp_servers = [s for s in servers if s.get("server_label") != label]
+            self.agent.mcp_servers.append({"type": "sse", "url": url, "server_label": label})
+            renderer.render_success(f"已添加 MCP server：{label}  ({url})")
+            return
+
+        if sub == "remove":
+            if len(parts) < 2:
+                renderer.render_error("用法：/mcp remove <label>")
+                return
+            label = parts[1]
+            before = len(self.agent.mcp_servers)
+            self.agent.mcp_servers = [s for s in servers if s.get("server_label") != label]
+            if len(self.agent.mcp_servers) < before:
+                renderer.render_success(f"已移除 MCP server：{label}")
+            else:
+                renderer.render_error(f"未找到 label 为 '{label}' 的 MCP server")
+            return
+
+        renderer.render_error("用法：/mcp  /mcp add <label> <url>  /mcp remove <label>")
+
+    def _cmd_export_dataset(self, arg: str) -> None:
+        from pathlib import Path as _Path
+        out = _Path(arg).expanduser() if arg else None
+        renderer.render_info("生成数据集中（低分回答会调用 Ernie 重写，请稍候）…")
+        try:
+            result_path = self.agent.export_dataset(out_path=out)
+            lines = sum(1 for _ in result_path.open())
+            renderer.render_success(f"导出完成：{result_path}  ({lines} 条记录)")
+        except FileNotFoundError as e:
+            renderer.render_error(str(e))
+        except Exception as e:
+            renderer.render_error(f"导出失败：{e}")
 
     def _cmd_doctor(self, _: str) -> None:
         import importlib

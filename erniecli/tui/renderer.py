@@ -107,6 +107,32 @@ def render_success(msg: str) -> None:
     _console.print(f"[{BAIDU_GREEN}]{msg}[/{BAIDU_GREEN}]")
 
 
+def render_turn_feedback_hint() -> None:
+    """Show single-line quality hint after a model response."""
+    _console.print(
+        f"  [{BAIDU_GRAY}]↑ 好  ↓ 差  (其他键跳过)[/{BAIDU_GRAY}]",
+        end="",
+    )
+
+
+def render_turn_label_result(label: str) -> None:
+    """Show what label was recorded (replaces the hint line)."""
+    if label == "up":
+        _console.print(f"\r  [{BAIDU_GREEN}]✓ 已标记：好[/{BAIDU_GREEN}]        ")
+    elif label == "down":
+        _console.print(f"\r  [{BAIDU_RED}]✗ 已标记：差[/{BAIDU_RED}]        ")
+    else:
+        _console.print()   # just clear the hint
+
+
+def render_session_score_header() -> None:
+    _console.print(f"\n[{BAIDU_BLUE}]帮我变聪明一下？(Enter 跳过全部)[/{BAIDU_BLUE}]")
+
+
+def render_session_score_question(q: str) -> None:
+    _console.print(f"  [{WHITE}]{q}[/{WHITE}]", end="  ")
+
+
 def render_separator() -> None:
     _console.print(Rule(style=DIM))
 

@@ -7,20 +7,23 @@ import json
 import mimetypes
 import os
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-_SESSIONS_DIR = Path.home() / ".ernie" / "sessions"
+_SESSIONS_DIR  = Path.home() / ".ernie" / "sessions"
+_DATASET_DIR   = Path.home() / ".ernie" / "dataset"
+
+from erniecli.api.client import ErnieClient, StreamResult
+from erniecli.agent.tools import ALL_TOOLS, execute_tool
+from erniecli.config import Config
+from erniecli.tui import renderer
 
 
 def _session_path(cwd: str) -> Path:
     key = hashlib.sha1(cwd.encode()).hexdigest()[:16]
     return _SESSIONS_DIR / f"{key}.json"
 
-from erniecli.api.client import ErnieClient, StreamResult
-from erniecli.agent.tools import ALL_TOOLS, execute_tool
-from erniecli.config import Config
-from erniecli.tui import renderer
 
 _SYSTEM_PROMPT = """\
 You are ErnieCLI, a powerful coding and research assistant running in the terminal.
@@ -44,7 +47,28 @@ You have access to tools: read_file, list_directory, write_file, bash, baidu_sea
 - 给出代码时提供完整可运行示例，不省略关键部分
 """
 
-_MAX_TOOL_ROUNDS = 20  # prevent infinite loops
+_MAX_TOOL_ROUNDS = 20
+
+
+@dataclass
+class TurnRecord:
+    """Single conversation turn with quality signals."""
+    idx: int
+    user: str
+    assistant: str
+    label: Optional[str] = None          # "up" | "down" | None
+    tool_rounds: int = 0
+    tool_failures: int = 0
+    response_chars: int = 0
+    interrupted: bool = False            # user hit Ctrl+C mid-turn
+
+
+@dataclass
+class SessionScore:
+    solved: str = ""       # "y" | "n" | "?"
+    verbose: int = 0       # 1=少 2=刚好 3=多
+    tool_quality: int = 0  # 1=准 2=一般 3=乱
+    comment: str = ""
 
 
 class AgentLoop:
@@ -61,9 +85,15 @@ class AgentLoop:
         self._memory: str = ""
         self.messages: list[dict] = [{"role": "system", "content": _SYSTEM_PROMPT}]
         self.search_enabled = cfg.search_enabled
+        self.mcp_servers: list[dict] = list(cfg.mcp_servers)
+        # feedback tracking
+        self._turns: list[TurnRecord] = []
+        self.session_score: Optional[SessionScore] = None
 
     def reset(self) -> None:
-        self._memory: str = ""
+        self._memory = ""
+        self._turns = []
+        self.session_score = None
         self.messages = [{"role": "system", "content": self._build_system()}]
 
     def _build_system(self) -> str:
@@ -74,7 +104,6 @@ class AgentLoop:
 
     def inject_memory(self, text: str) -> None:
         self._memory = (self._memory + "\n" + text).strip()
-        # update system message in-place
         self.messages[0]["content"] = self._build_system()
 
     def clear_memory(self) -> None:
@@ -82,27 +111,19 @@ class AgentLoop:
         self.messages[0]["content"] = self._build_system()
 
     def inject_context(self, text: str) -> None:
-        """Inject extra context as a system message."""
         self.messages.append({"role": "user", "content": f"[context injection]\n{text}"})
         self.messages.append({"role": "assistant", "content": "已收到上下文，我会在后续回答中参考这些内容。"})
 
     def compact(self) -> None:
-        """Summarise the conversation then replace history with the summary."""
         msgs = [m for m in self.messages if m["role"] != "system"]
         if not msgs:
             return
-        history_text = "\n".join(
-            f"[{m['role']}]: {m.get('content','')}"
-            for m in msgs
-        )
-        summary_prompt = (
-            "请将以下对话历史压缩成一段简明的中文摘要，保留关键信息、决策和代码片段：\n\n"
-            + history_text[:6000]
-        )
-        # non-streaming compact call
+        history_text = "\n".join(f"[{m['role']}]: {m.get('content','')}" for m in msgs)
         result = self.client.chat([
             {"role": "system", "content": "你是一个对话摘要助手。"},
-            {"role": "user",   "content": summary_prompt},
+            {"role": "user",   "content":
+             "请将以下对话历史压缩成一段简明的中文摘要，保留关键信息、决策和代码片段：\n\n"
+             + history_text[:6000]},
         ])
         summary = result.content or "(摘要失败)"
         self.messages = [
@@ -112,29 +133,45 @@ class AgentLoop:
         ]
 
     def add_user_message(self, text: str, image_path: Optional[str] = None) -> None:
-        if image_path:
-            content = _build_image_content(text, image_path)
-        else:
-            content = text
+        content = _build_image_content(text, image_path) if image_path else text
         self.messages.append({"role": "user", "content": content})
 
+    # ── turn label (called by REPL after showing feedback prompt) ─────────────
+
+    def set_last_turn_label(self, label: str) -> None:
+        """Set 'up'/'down' label on the most recently completed turn."""
+        if self._turns:
+            self._turns[-1].label = label
+
+    def mark_last_turn_interrupted(self) -> None:
+        if self._turns:
+            self._turns[-1].interrupted = True
+
+    # ── session persistence ───────────────────────────────────────────────────
+
     def save_session(self) -> Path:
-        """Persist current conversation to ~/.ernie/sessions/<cwd-hash>.json."""
         _SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
         cwd = os.getcwd()
         path = _session_path(cwd)
-        payload = {
+        payload: dict = {
             "cwd":      cwd,
             "model":    self.cfg.model,
             "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "messages": [m for m in self.messages if m["role"] != "system"],
+            "turns":    [_turn_to_dict(t) for t in self._turns],
         }
+        if self.session_score:
+            payload["session_score"] = {
+                "solved":       self.session_score.solved,
+                "verbose":      self.session_score.verbose,
+                "tool_quality": self.session_score.tool_quality,
+                "comment":      self.session_score.comment,
+            }
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
         return path
 
     @staticmethod
     def session_info(cwd: str | None = None) -> dict | None:
-        """Return metadata of the saved session for cwd (or os.getcwd())."""
         path = _session_path(cwd or os.getcwd())
         if not path.exists():
             return None
@@ -146,28 +183,39 @@ class AgentLoop:
             return None
 
     def load_session(self, cwd: str | None = None) -> int:
-        """Load saved session for cwd. Returns number of messages restored."""
         info = self.session_info(cwd)
         if not info:
             return 0
         msgs = info.get("messages", [])
         self.messages = [{"role": "system", "content": self._build_system()}] + msgs
+        # restore turn records if present (labels survive /resume)
+        self._turns = [_dict_to_turn(d) for d in info.get("turns", [])]
         return len(msgs)
 
-    def run_turn(self, user_text: str, image_path: Optional[str] = None) -> None:
-        """Run one full turn (may involve multiple tool-call rounds)."""
+    # ── run ───────────────────────────────────────────────────────────────────
+
+    def run_turn(self, user_text: str, image_path: Optional[str] = None) -> TurnRecord:
+        """Run one full turn. Returns a TurnRecord with auto-signals filled in."""
         self.add_user_message(user_text, image_path=image_path)
+
+        turn = TurnRecord(idx=len(self._turns), user=user_text, assistant="")
+        tool_rounds = 0
+        tool_failures = 0
 
         for _round in range(_MAX_TOOL_ROUNDS):
             result = self._stream_and_render()
 
             if not result.tool_calls:
-                # No more tool calls — turn is complete
+                turn.assistant = result.content
+                turn.tool_rounds = tool_rounds
+                turn.tool_failures = tool_failures
+                turn.response_chars = len(result.content)
                 self.messages.append({"role": "assistant", "content": result.content})
+                self._turns.append(turn)
                 self.save_session()
-                return
+                return turn
 
-            # Append assistant message with tool calls in OpenAI format
+            tool_rounds += 1
             self.messages.append({
                 "role": "assistant",
                 "content": result.content or None,
@@ -181,12 +229,13 @@ class AgentLoop:
                 ],
             })
 
-            # Execute each tool call and collect results
             tool_results: list[dict] = []
             for tc in result.tool_calls:
                 renderer.render_tool_call(tc["name"], tc["args"])
                 success, output, sources = execute_tool(tc["name"], tc["args"], client=self.client)
                 renderer.render_tool_result(tc["name"], output, success=success, sources=sources)
+                if not success:
+                    tool_failures += 1
                 tool_results.append({
                     "role": "tool",
                     "tool_call_id": tc["id"] or "call_0",
@@ -196,13 +245,15 @@ class AgentLoop:
             self.messages.extend(tool_results)
 
         renderer.render_error("达到最大工具调用轮次限制，请重试。")
+        turn.tool_rounds = tool_rounds
+        turn.tool_failures = tool_failures
+        self._turns.append(turn)
+        return turn
 
     def run_single(self, question: str, image_path: Optional[str] = None) -> None:
-        """Single-shot mode: ask one question and exit."""
         self.run_turn(question, image_path=image_path)
 
     def _stream_and_render(self) -> StreamResult:
-        """Stream the next response, rendering chunks in real-time."""
         stream_renderer = renderer.StreamRenderer()
         result: StreamResult | None = None
 
@@ -210,6 +261,7 @@ class AgentLoop:
             messages=self.messages,
             tools=ALL_TOOLS,
             search_enabled=self.search_enabled,
+            mcp_servers=self.mcp_servers or None,
         )
 
         try:
@@ -230,13 +282,140 @@ class AgentLoop:
         )
         return result  # type: ignore[return-value]
 
+    # ── dataset export ────────────────────────────────────────────────────────
+
+    def export_dataset(self, out_path: Optional[Path] = None) -> Path:
+        """Generate DPO jsonl from all saved sessions. Returns output path."""
+        _DATASET_DIR.mkdir(parents=True, exist_ok=True)
+        out = out_path or (_DATASET_DIR / f"dpo_{time.strftime('%Y%m%d_%H%M%S')}.jsonl")
+
+        session_files = list(_SESSIONS_DIR.glob("*.json"))
+        if not session_files:
+            raise FileNotFoundError("没有找到任何会话文件。")
+
+        records: list[dict] = []
+        for sf in session_files:
+            try:
+                data = json.loads(sf.read_text())
+            except Exception:
+                continue
+
+            score = data.get("session_score", {})
+            turns = data.get("turns", [])
+            model = data.get("model", "ernie-5.1")
+            session_id = sf.stem
+
+            # skip sessions where problem wasn't solved at all
+            if score.get("solved") == "n" and not any(
+                t.get("label") == "up" for t in turns
+            ):
+                continue
+
+            for t in turns:
+                user      = t.get("user", "")
+                assistant = t.get("assistant", "")
+                label     = t.get("label")
+
+                if not user or not assistant:
+                    continue
+
+                signals = {
+                    "tool_rounds":    t.get("tool_rounds", 0),
+                    "tool_failures":  t.get("tool_failures", 0),
+                    "response_chars": t.get("response_chars", 0),
+                    "interrupted":    t.get("interrupted", False),
+                }
+                is_bad = (
+                    label == "down"
+                    or t.get("interrupted")
+                    or t.get("tool_failures", 0) >= 2
+                    or (score.get("verbose") == 3 and not label)
+                )
+
+                if label == "up":
+                    # clean positive example — no rewriting needed
+                    records.append({
+                        "source":     "ernie-cli-v1",
+                        "session_id": session_id,
+                        "type":       "positive",
+                        "prompt":     user,
+                        "chosen":     assistant,
+                        "rejected":   None,
+                        "metadata":   {"model": model, "session_score": score, "signals": signals},
+                    })
+                elif is_bad:
+                    # ask Ernie to rewrite into a better response
+                    rewritten = self._rewrite_response(user, assistant, score)
+                    if rewritten and rewritten != assistant:
+                        records.append({
+                            "source":     "ernie-cli-v1",
+                            "session_id": session_id,
+                            "type":       "dpo_pair",
+                            "prompt":     user,
+                            "chosen":     rewritten,
+                            "rejected":   assistant,
+                            "metadata":   {"model": model, "session_score": score, "signals": signals},
+                        })
+
+        with out.open("w", encoding="utf-8") as f:
+            for r in records:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+        return out
+
+    def _rewrite_response(self, user: str, bad_response: str, score: dict) -> str:
+        """Ask Ernie to produce a better response given quality feedback."""
+        hints: list[str] = []
+        if score.get("verbose") == 3:
+            hints.append("回复要简洁，避免冗长解释，直接给出结论和代码。")
+        if score.get("tool_quality") == 3:
+            hints.append("避免不必要的工具调用，只在真正需要时才调用工具。")
+        if score.get("solved") == "n":
+            hints.append("上一版回答没有解决用户问题，请重新思考并给出正确答案。")
+        hint_text = "\n".join(hints) if hints else "请提供一个更高质量、更简洁准确的回答。"
+
+        result = self.client.chat([
+            {"role": "system", "content":
+             f"你是一个专业的代码助手。请根据以下改进要求，重写这个回答：\n{hint_text}"},
+            {"role": "user", "content":
+             f"原始问题：{user}\n\n原始回答（质量不佳）：\n{bad_response}\n\n"
+             f"请给出改进后的回答："},
+        ])
+        return result.content or ""
+
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+def _turn_to_dict(t: TurnRecord) -> dict:
+    return {
+        "idx":           t.idx,
+        "user":          t.user,
+        "assistant":     t.assistant,
+        "label":         t.label,
+        "tool_rounds":   t.tool_rounds,
+        "tool_failures": t.tool_failures,
+        "response_chars":t.response_chars,
+        "interrupted":   t.interrupted,
+    }
+
+
+def _dict_to_turn(d: dict) -> TurnRecord:
+    return TurnRecord(
+        idx           = d.get("idx", 0),
+        user          = d.get("user", ""),
+        assistant     = d.get("assistant", ""),
+        label         = d.get("label"),
+        tool_rounds   = d.get("tool_rounds", 0),
+        tool_failures = d.get("tool_failures", 0),
+        response_chars= d.get("response_chars", 0),
+        interrupted   = d.get("interrupted", False),
+    )
+
 
 def _build_image_content(text: str, image_path: str) -> list[dict]:
-    """Build a multimodal content list with text + image."""
     p = Path(image_path).expanduser()
     if not p.exists():
         raise FileNotFoundError(f"Image not found: {image_path}")
-
     mime, _ = mimetypes.guess_type(str(p))
     mime = mime or "image/jpeg"
     data = base64.b64encode(p.read_bytes()).decode()

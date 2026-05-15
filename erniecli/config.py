@@ -24,6 +24,8 @@ class Config:
     search_enabled: bool = False
     history_path: Path = field(default_factory=lambda: Path.home() / ".ernie" / "history.json")
     timeout: int = 120
+    # MCP server list — each entry: {type, url/command/args, server_label}
+    mcp_servers: list = field(default_factory=list)
 
     def validate(self) -> None:
         if not self.api_key:
@@ -64,9 +66,12 @@ def _apply_yaml(cfg: Config, data: dict) -> None:
         "search":        "search_enabled",
         "history_path":  None,  # handled below
         "timeout":       "timeout",
+        "mcp_servers":   None,  # handled below
     }
     for yaml_key, attr in mapping.items():
         if yaml_key in data and attr:
             setattr(cfg, attr, data[yaml_key])
     if "history_path" in data:
         cfg.history_path = Path(data["history_path"]).expanduser()
+    if "mcp_servers" in data and isinstance(data["mcp_servers"], list):
+        cfg.mcp_servers = data["mcp_servers"]
