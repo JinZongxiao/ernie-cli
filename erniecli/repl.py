@@ -211,7 +211,7 @@ _CMD_META: dict[str, str] = {
     "/roast":          "无情嘲讽：让 AI 嘲讽你的操作",
     "/fortune":        "赛博木鱼：敲一下，功德+1",
     "/weekly":         "生成本工作周 Markdown 周报",
-    "/tieba":          "贴吧多智能体论战模式（🦅🐲🤡🐟💀 五大吧友 + 终结者方案）",
+    "/tieba":          "贴吧多智能体论战模式（八大吧友 + 终结者方案）",
     "/doctor":         "诊断环境",
     "/export-dataset": "导出 DPO 数据集",
     "/quit":           "退出",
@@ -251,7 +251,7 @@ _COMMANDS_HELP = [
         ("/init",           "在当前目录创建 ERNIE.md 项目说明文件"),
         ("/weekly [path]",  "扫描本工作周改动文件，生成 Markdown 周报（默认保存到当前目录）"),
         ("/status",         "显示当前会话状态（模型、token 用量等）"),
-        ("/cost",           "估算本次会话 token 用量与费用"),
+        ("/cost",           "粗略估算上下文 token 和参考费用"),
     ]),
     ("MCP", [
         ("/mcp",            "列出已连接的 MCP server"),
