@@ -44,12 +44,14 @@ _DIR_COMPLETER  = PathCompleter(only_directories=True)
 
 
 def _read_one_key() -> str:
-    """Read a single keypress without Enter. Returns 'up', 'down', or ''."""
+    """Read a single keypress without Enter. Returns 'up', 'down', 'enter', or ''."""
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
         ch = sys.stdin.read(1)
+        if ch in ("\r", "\n"):
+            return "enter"
         if ch == "\x1b":
             ch2 = sys.stdin.read(1)
             if ch2 == "[":
@@ -360,8 +362,9 @@ class REPL:
         self._pending_image = None
         renderer.render_separator()
         interrupted = False
+        turn = None
         try:
-            self.agent.run_turn(text, image_path=image)
+            turn = self.agent.run_turn(text, image_path=image)
         except KeyboardInterrupt:
             renderer.render_info("\n已中断。")
             interrupted = True
@@ -370,15 +373,28 @@ class REPL:
             renderer.render_error(str(exc))
         renderer.render_separator()
 
-        # show turn feedback hint (skip if interrupted)
-        if not interrupted and self.agent._turns:
+        if interrupted:
+            return
+
+        # ── collapsible thinking ──────────────────────────────────────────────
+        reasoning = turn.reasoning if turn else ""
+        if reasoning.strip():
+            renderer.render_thinking_hint(len(reasoning))
+            key = _read_one_key()
+            if key == "enter":
+                renderer.render_thinking(reasoning)
+            else:
+                self.console.print()  # newline after hint
+
+        # ── turn feedback ─────────────────────────────────────────────────────
+        if self.agent._turns:
             renderer.render_turn_feedback_hint()
             label = _read_one_key()
             if label in ("up", "down"):
                 self.agent.set_last_turn_label(label)
                 renderer.render_turn_label_result(label)
             else:
-                renderer.render_turn_label_result("")   # just newline
+                renderer.render_turn_label_result("")
 
     # ── session scoring (called on exit) ─────────────────────────────────────
 

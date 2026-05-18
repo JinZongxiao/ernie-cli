@@ -115,6 +115,14 @@ def render_turn_feedback_hint() -> None:
     )
 
 
+def render_thinking_hint(chars: int) -> None:
+    """Show collapsed thinking indicator. User presses ↵ to expand."""
+    _console.print(
+        f"  [{BAIDU_GRAY}]💭 思考过程 ({chars:,} 字)  ↵ 展开  其他键跳过[/{BAIDU_GRAY}]",
+        end="",
+    )
+
+
 def render_turn_label_result(label: str) -> None:
     """Show what label was recorded (replaces the hint line)."""
     if label == "up":
@@ -195,14 +203,12 @@ class StreamRenderer:
         self._reasoning_buf = ""
 
     def feed_reasoning(self, chunk: str) -> None:
+        # Buffer silently — never print during streaming
         self._reasoning_buf += chunk
-        _console.print(chunk, end="", style=f"dim {BAIDU_GRAY}", highlight=False)
 
     def end_reasoning(self) -> None:
-        if self._reasoning_buf:
-            _console.print()
-            render_thinking(self._reasoning_buf)
-            self._reasoning_buf = ""
+        # Nothing to do; buf stays populated for REPL to handle
+        pass
 
     def feed_content(self, chunk: str) -> None:
         self._buf += chunk
@@ -212,3 +218,6 @@ class StreamRenderer:
         _console.print()
         if sources:
             render_sources(sources, search_tokens)
+
+    def get_reasoning(self) -> str:
+        return self._reasoning_buf

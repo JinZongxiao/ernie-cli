@@ -117,13 +117,14 @@ class BossLoop(AgentLoop):
         tool_failures = 0
 
         for _round in range(_MAX_TOOL_ROUNDS):
-            result = self._boss_stream_and_render()
+            result, reasoning = self._boss_stream_and_render()
 
             if not result.tool_calls:
                 turn.assistant = result.content
                 turn.tool_rounds = tool_rounds
                 turn.tool_failures = tool_failures
                 turn.response_chars = len(result.content)
+                turn.reasoning = reasoning
                 self.messages.append({"role": "assistant", "content": result.content})
                 self._turns.append(turn)
                 self.save_session()
@@ -184,7 +185,7 @@ class BossLoop(AgentLoop):
         self._turns.append(turn)
         return turn
 
-    def _boss_stream_and_render(self):
+    def _boss_stream_and_render(self) -> tuple:
         """Stream with boss tool set (delegate + regular tools)."""
         stream_renderer = renderer.StreamRenderer()
         result = None
@@ -202,8 +203,6 @@ class BossLoop(AgentLoop):
                 if chunk_type == "reasoning":
                     stream_renderer.feed_reasoning(chunk_text)
                 else:
-                    if stream_renderer._reasoning_buf:
-                        stream_renderer.end_reasoning()
                     stream_renderer.feed_content(chunk_text)
         except StopIteration as exc:
             result = exc.value
@@ -212,4 +211,4 @@ class BossLoop(AgentLoop):
             sources=result.sources if self.search_enabled else None,
             search_tokens=result.search_tokens,
         )
-        return result
+        return result, stream_renderer.get_reasoning()

@@ -76,6 +76,7 @@ class TurnRecord:
     tool_failures: int = 0
     response_chars: int = 0
     interrupted: bool = False            # user hit Ctrl+C mid-turn
+    reasoning: str = ""                  # buffered thinking content
 
 
 @dataclass
@@ -225,13 +226,14 @@ class AgentLoop:
         tool_failures = 0
 
         for _round in range(_MAX_TOOL_ROUNDS):
-            result = self._stream_and_render()
+            result, reasoning = self._stream_and_render()
 
             if not result.tool_calls:
                 turn.assistant = result.content
                 turn.tool_rounds = tool_rounds
                 turn.tool_failures = tool_failures
                 turn.response_chars = len(result.content)
+                turn.reasoning = reasoning
                 self.messages.append({"role": "assistant", "content": result.content})
                 self._turns.append(turn)
                 self.save_session()
@@ -275,7 +277,7 @@ class AgentLoop:
     def run_single(self, question: str, image_path: Optional[str] = None) -> None:
         self.run_turn(question, image_path=image_path)
 
-    def _stream_and_render(self) -> StreamResult:
+    def _stream_and_render(self) -> tuple[StreamResult, str]:
         stream_renderer = renderer.StreamRenderer()
         result: StreamResult | None = None
 
@@ -292,8 +294,6 @@ class AgentLoop:
                 if chunk_type == "reasoning":
                     stream_renderer.feed_reasoning(chunk_text)
                 else:
-                    if stream_renderer._reasoning_buf:
-                        stream_renderer.end_reasoning()
                     stream_renderer.feed_content(chunk_text)
         except StopIteration as exc:
             result = exc.value
@@ -302,7 +302,7 @@ class AgentLoop:
             sources=result.sources if self.search_enabled else None,
             search_tokens=result.search_tokens,
         )
-        return result  # type: ignore[return-value]
+        return result, stream_renderer.get_reasoning()  # type: ignore[return-value]
 
     # ── dataset export ────────────────────────────────────────────────────────
 
