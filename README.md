@@ -14,13 +14,15 @@
          github.com/JinZongxiao/ernie-cli
 ```
 
+> 独立开发者项目，非百度官方产品；基于公开 API 构建。
+
 最新更新：🏟️ **贴吧模式重磅上线** · 📅 周报生成 · 🎭 娱乐三件套 · 💭 折叠思考 → [CHANGELOG](CHANGELOG.md)
 
 ---
 
 ## 这是什么
 
-**ErnieCLI** 是一个跑在终端里的 AI Agent，基于文心 Ernie 5.1。
+**ErnieCLI** 是一个跑在终端里的 AI Agent，默认基于文心 Ernie 5.1，也支持切换任意 OpenAI-compatible 模型（如 DeepSeek、Qwen 等）。
 
 不是 wrapper，不是聊天框套壳，也不是谁的"平替"——是从中文互联网自己的需求出发，重新想过的东西：
 
@@ -167,7 +169,7 @@ pip install -e .
 | `/init` | 分析当前项目，生成 ERNIE.md 说明文件 |
 | `/weekly [路径]` | 扫描本工作周改动文件，AI 分析生成 Markdown 周报 |
 | `/status` | 查看当前状态：模型、token 用量、存档情况 |
-| `/cost` | 估算本次对话 token 用量与费用 |
+| `/cost` | 按上下文长度粗略估算 token 用量，真实费用以 AI Studio 控制台为准 |
 
 ### 记忆
 
@@ -276,8 +278,8 @@ Agent 执行命令时分三档，不会偷偷给你删东西：
 | 级别 | 例子 | 行为 |
 |------|------|------|
 | ✅ 安全 | `ls`、`cat`、`grep`、`git status` | 自动执行 |
-| ⚠️ 写操作 | `mkdir`、`pip install`、`git commit` | 显示命令，回车确认 |
-| ☠️ 危险 | `rm`、`sudo`、`curl \| sh` | 红字警告，必须输 `yes` |
+| ⚠️ 写操作/执行 | `mkdir`、`pip install`、`python script.py`、`curl`、`git commit` | 显示命令，回车确认 |
+| ☠️ 危险 | `rm`、`sudo`、`curl \| sh`、`git clean`、`git push --force` | 红字警告，必须输 `yes` |
 
 `pip install` 会自动加清华镜像。
 
