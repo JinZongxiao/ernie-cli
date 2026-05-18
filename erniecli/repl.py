@@ -133,7 +133,6 @@ class _SlashCompleter(Completer):
         if verb == "/model":
             if nargs == 1 or (nargs == 2 and not trailing_space):
                 cur = parts[1] if nargs == 2 else ""
-                # try live list first, fall back to known list
                 try:
                     live = self._repl.agent.client.list_models()
                     models = live if live else list(_KNOWN_MODELS)
@@ -142,6 +141,14 @@ class _SlashCompleter(Completer):
                 for m in models:
                     if m.startswith(cur):
                         yield Completion(m, start_position=-len(cur))
+            return
+
+        if verb == "/boss":
+            if nargs == 1 or (nargs == 2 and not trailing_space):
+                cur = parts[1] if nargs == 2 else ""
+                for s in ("on", "off", "status"):
+                    if s.startswith(cur):
+                        yield Completion(s, start_position=-len(cur))
             return
 
         # ── path-completing commands ──────────────────────────────────────────
@@ -160,7 +167,7 @@ class _SlashCompleter(Completer):
 _ALL_CMDS = [
     "/help", "/clear", "/compact", "/history", "/resume",
     "/add", "/img", "/model", "/search", "/review", "/run", "/cd",
-    "/init", "/status", "/cost", "/memory", "/mcp", "/doctor",
+    "/init", "/status", "/cost", "/memory", "/mcp", "/boss", "/doctor",
     "/export-dataset", "/quit", "/exit",
 ]
 
@@ -183,10 +190,11 @@ _CMD_META: dict[str, str] = {
     "/cost":           "费用估算",
     "/memory":         "持久记忆",
     "/mcp":            "MCP servers",
+    "/boss":           "Boss 多智能体模式",
     "/doctor":         "诊断环境",
     "/export-dataset": "导出 DPO 数据集",
     "/quit":           "退出",
-    "/exit":    "退出",
+    "/exit":           "退出",
 }
 
 _PROMPT_STYLE = Style.from_dict({
@@ -227,6 +235,11 @@ _COMMANDS_HELP = [
         ("/mcp add <label> <url>",  "添加 SSE 类型的 MCP server"),
         ("/mcp remove <label>",     "移除 MCP server"),
     ]),
+    ("Boss 模式", [
+        ("/boss",           "查看 Boss 模式状态"),
+        ("/boss on",        "开启 Boss 模式（Ernie 规划，Worker 执行）"),
+        ("/boss off",       "关闭 Boss 模式，回到普通模式"),
+    ]),
     ("记忆", [
         ("/memory",         "查看持久记忆（注入每次对话的系统提示）"),
         ("/memory add <text>", "追加一条持久记忆"),
@@ -255,7 +268,8 @@ def _count_tokens(messages: list[dict]) -> int:
 class REPL:
     def __init__(self, cfg: Config):
         self.cfg = cfg
-        self.agent = AgentLoop(cfg)
+        self._boss_mode = cfg.boss_mode
+        self.agent = self._make_agent()
         self.console = renderer.get_console()
         self._pending_image: Optional[str] = None
 
@@ -264,10 +278,17 @@ class REPL:
             history=FileHistory(str(_HISTORY_FILE)),
             auto_suggest=AutoSuggestFromHistory(),
             completer=_SlashCompleter(self),
-            complete_while_typing=False,  # only Tab triggers completion
+            complete_while_typing=False,
             style=_PROMPT_STYLE,
         )
         self._load_memory()
+
+    def _make_agent(self):
+        if self._boss_mode:
+            from erniecli.agent.boss import BossLoop
+            return BossLoop(self.cfg)
+        from erniecli.agent.loop import AgentLoop
+        return AgentLoop(self.cfg)
 
     # ── startup ──────────────────────────────────────────────────────────────
 
@@ -306,6 +327,8 @@ class REPL:
 
     def _make_prompt(self) -> HTML:
         tags = ""
+        if self._boss_mode:
+            tags += " <tag>👑BOSS</tag>"
         if self.cfg.search_enabled:
             tags += " <tag>🔍</tag>"
         if self._pending_image:
@@ -406,6 +429,7 @@ class REPL:
             "/cost":    self._cmd_cost,
             "/memory":  self._cmd_memory,
             "/mcp":     self._cmd_mcp,
+            "/boss":    self._cmd_boss,
             "/doctor":  self._cmd_doctor,
             "/export-dataset": self._cmd_export_dataset,
         }
@@ -728,6 +752,54 @@ class REPL:
             return
 
         renderer.render_error("用法：/mcp  /mcp add <label> <url>  /mcp remove <label>")
+
+    def _cmd_boss(self, arg: str) -> None:
+        sub = arg.strip().lower()
+        if sub in ("on", ""):
+            if self._boss_mode:
+                renderer.render_info(
+                    f"Boss 模式已开启  Boss: {self.cfg.model}  "
+                    f"Worker: {self.cfg.worker_model}"
+                )
+                return
+            self._boss_mode = True
+            # preserve memory/session then rebuild agent
+            old_memory  = self.agent._memory
+            old_msgs    = self.agent.messages
+            self.agent  = self._make_agent()
+            self.agent._memory   = old_memory
+            self.agent.messages  = old_msgs
+            self.agent.messages[0]["content"] = self.agent._build_system()
+            renderer.render_success(
+                f"👑 Boss 模式已开启\n"
+                f"  Boss  : {self.cfg.model}\n"
+                f"  Worker: {self.cfg.worker_model} ({self.cfg.worker_base_url})\n"
+                f"  Ernie 5.1 负责规划，Worker 负责执行"
+            )
+        elif sub == "off":
+            if not self._boss_mode:
+                renderer.render_info("Boss 模式未开启。")
+                return
+            self._boss_mode = False
+            old_memory = self.agent._memory
+            old_msgs   = self.agent.messages
+            self.agent = self._make_agent()
+            self.agent._memory  = old_memory
+            self.agent.messages = old_msgs
+            self.agent.messages[0]["content"] = self.agent._build_system()
+            renderer.render_info("Boss 模式已关闭，回到普通模式。")
+        elif sub == "status":
+            if self._boss_mode:
+                renderer.render_info(
+                    f"👑 Boss 模式：开启\n"
+                    f"  Boss  : {self.cfg.model}\n"
+                    f"  Worker: {self.cfg.worker_model}\n"
+                    f"  Worker base_url: {self.cfg.worker_base_url}"
+                )
+            else:
+                renderer.render_info("Boss 模式：关闭  /boss on 开启")
+        else:
+            renderer.render_error("用法：/boss  /boss on  /boss off  /boss status")
 
     def _cmd_export_dataset(self, arg: str) -> None:
         from pathlib import Path as _Path

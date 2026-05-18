@@ -12,6 +12,8 @@ import yaml
 _CONFIG_PATH = Path.home() / ".ernie" / "config.yaml"
 _DEFAULT_MODEL = "ernie-5.1"
 _DEFAULT_BASE_URL = "https://aistudio.baidu.com/llm/lmapi/v3"
+_DEFAULT_WORKER_MODEL    = "deepseek-v4-flash"
+_DEFAULT_WORKER_BASE_URL = "https://api.deepseek.com/v1"
 
 
 @dataclass
@@ -26,6 +28,11 @@ class Config:
     timeout: int = 120
     # MCP server list — each entry: {type, url/command/args, server_label}
     mcp_servers: list = field(default_factory=list)
+    # Boss mode — worker model config
+    boss_mode: bool = False
+    worker_model: str = _DEFAULT_WORKER_MODEL
+    worker_api_key: str = ""       # falls back to api_key if empty
+    worker_base_url: str = _DEFAULT_WORKER_BASE_URL
 
     def validate(self) -> None:
         if not self.api_key:
@@ -58,15 +65,19 @@ def load_config(config_path: Optional[Path] = None) -> Config:
 
 def _apply_yaml(cfg: Config, data: dict) -> None:
     mapping = {
-        "api_key":       "api_key",
-        "base_url":      "base_url",
-        "model":         "model",
-        "max_tokens":    "max_tokens",
-        "temperature":   "temperature",
-        "search":        "search_enabled",
-        "history_path":  None,  # handled below
-        "timeout":       "timeout",
-        "mcp_servers":   None,  # handled below
+        "api_key":          "api_key",
+        "base_url":         "base_url",
+        "model":            "model",
+        "max_tokens":       "max_tokens",
+        "temperature":      "temperature",
+        "search":           "search_enabled",
+        "history_path":     None,
+        "timeout":          "timeout",
+        "mcp_servers":      None,
+        "boss_mode":        "boss_mode",
+        "worker_model":     "worker_model",
+        "worker_api_key":   "worker_api_key",
+        "worker_base_url":  "worker_base_url",
     }
     for yaml_key, attr in mapping.items():
         if yaml_key in data and attr:

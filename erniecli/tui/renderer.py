@@ -137,6 +137,58 @@ def render_separator() -> None:
     _console.print(Rule(style=DIM))
 
 
+# ── Boss mode rendering ───────────────────────────────────────────────────────
+
+def render_boss_dispatch(task: str, worker_model: str) -> None:
+    """Show Boss delegating a task to Worker."""
+    preview = task[:120] + ("…" if len(task) > 120 else "")
+    panel = Panel(
+        Text(preview, style=WHITE),
+        title=f"[{BAIDU_BLUE}]🎯 Boss → Worker[/{BAIDU_BLUE}]  [{BAIDU_GOLD}]{worker_model}[/{BAIDU_GOLD}]",
+        border_style=BAIDU_BLUE,
+        box=box.ROUNDED,
+        expand=False,
+    )
+    _console.print(panel)
+
+
+def render_worker_tool_call(tool_name: str, args: dict) -> None:
+    """Worker's tool call — dimmer, indented."""
+    args_text = "\n".join(f"  {k}: {v}" for k, v in args.items())
+    icon = "🔍" if tool_name == "baidu_search" else "⚙"
+    panel = Panel(
+        Text(args_text or "(no args)", style=f"dim {WHITE}"),
+        title=f"[dim {BAIDU_GRAY}]{icon} Worker.{tool_name}[/dim {BAIDU_GRAY}]",
+        border_style=BAIDU_DARK,
+        box=box.MINIMAL,
+        expand=False,
+        padding=(0, 2),
+    )
+    _console.print(panel)
+
+
+def render_worker_tool_result(tool_name: str, output: str, success: bool = True) -> None:
+    color = BAIDU_GREEN if success else BAIDU_RED
+    icon  = "✓" if success else "✗"
+    truncated = output[:800] + ("…" if len(output) > 800 else "")
+    _console.print(
+        f"  [{color}]{icon}[/{color}] [{BAIDU_GRAY}]{tool_name}: {truncated}[/{BAIDU_GRAY}]"
+    )
+
+
+def render_boss_worker_done(result: str) -> None:
+    """Show Worker result summary back to Boss."""
+    preview = result[:300] + ("…" if len(result) > 300 else "")
+    panel = Panel(
+        Text(preview, style=f"dim {WHITE}"),
+        title=f"[{BAIDU_GREEN}]✓ Worker 完成[/{BAIDU_GREEN}]",
+        border_style=BAIDU_GREEN,
+        box=box.ROUNDED,
+        expand=False,
+    )
+    _console.print(panel)
+
+
 class StreamRenderer:
     def __init__(self):
         self._buf = ""
