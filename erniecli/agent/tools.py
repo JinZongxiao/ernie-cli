@@ -275,7 +275,7 @@ ALL_TOOLS = [
     GLOB_SCHEMA,
     HTTP_REQUEST_SCHEMA,
     PYTHON_REPL_SCHEMA,
-    IMAGE_VIEW_SCHEMA,
+    # IMAGE_VIEW_SCHEMA — 已移除：marker 尚未转换为真正的 multimodal message
     NOTEBOOK_EXEC_SCHEMA,
     BAIDU_SEARCH_SCHEMA,
 ]

@@ -21,12 +21,12 @@ _SAFE_CMDS = {
     "echo", "printf", "wc", "sort", "uniq", "diff", "file",
     "pwd", "whoami", "id", "uname", "hostname", "date",
     "env", "printenv", "ps", "top", "htop", "df", "du",
-    "git", "python", "python3", "pip", "pip3",  # git reads by default; refined below
-    "jq", "awk", "sed",  # refined below for writes
-    "curl", "wget",  # refined below for writes
+    "git",              # git reads by default; write ops refined below
+    "jq", "awk", "sed", # refined below for writes
+    # NOTE: python/pip/curl/wget intentionally NOT here — too easy to write/exec
 }
 
-# Patterns that escalate a SAFE command to WRITE or DANGEROUS
+# Patterns that escalate to DANGEROUS
 _DANGEROUS_PATTERNS = [
     r"\brm\b",
     r"\bsudo\b",
@@ -45,24 +45,36 @@ _DANGEROUS_PATTERNS = [
     r"&&\s*rm\b",
     r"\beval\b",
     r"\bexec\b",
-    r":.*:\{.*:\}",  # fork bomb pattern
+    r":.*:\{.*:\}",               # fork bomb pattern
+    r"\bgit\s+clean\b",           # destroys untracked files
+    r"\bgit\s+(push\s+.*--force|push\s+-f)\b",
 ]
 
 _WRITE_PATTERNS = [
-    r"\brm\b(?!.*-r)",                    # rm without -r
+    r"\brm\b(?!.*-r)",            # rm without -r
     r"\bmkdir\b",
     r"\btouch\b",
     r"\bcp\b",
     r"\bmv\b",
-    r"\bpip\s+install\b",
+    r"\bpip3?\s+install\b",
     r"\bapt(-get)?\s+install\b",
     r"\byum\s+install\b",
+    r"\bconda\s+install\b",
     r"\bgit\s+(add|commit|push|reset|rebase|merge|tag|branch\s+-[dD])\b",
     r"\bsed\s+.*-i\b",
     r"\bawk\s+.*>\s*\S",
-    r">\s*\S",       # output redirect (write)
-    r">>\s*\S",      # output redirect (append — write tier)
+    r">\s*\S",                    # output redirect (write)
+    r">>\s*\S",                   # output redirect (append)
     r"\bwrite_file\b",
+    # previously-SAFE commands that can write files
+    r"\bpython3?\b",              # any python invocation
+    r"\bpip3?\b",                 # pip (install or not — may mutate env)
+    r"\bcurl\b",                  # network access
+    r"\bwget\b",                  # network access
+    r"\btee\b",                   # always writes
+    r"\btar\s+.*-x",              # extract (writes files)
+    r"\bunzip\b",                 # extract (writes files)
+    r"\bchmod\b",                 # changes permissions
 ]
 
 _DANGEROUS_RE = [re.compile(p) for p in _DANGEROUS_PATTERNS]

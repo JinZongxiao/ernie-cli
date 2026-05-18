@@ -717,7 +717,7 @@ class REPL:
         )
         # capture output into file instead of streaming to terminal
         self.agent.add_user_message(prompt)
-        result = self.agent._stream_and_render()
+        result, _reasoning = self.agent._stream_and_render()
         if result.content:
             ernie_md.write_text(result.content)
             self.agent.messages.append({"role": "assistant", "content": result.content})
@@ -852,9 +852,13 @@ class REPL:
             # preserve memory/session then rebuild agent
             old_memory  = self.agent._memory
             old_msgs    = self.agent.messages
+            old_turns   = self.agent._turns
+            old_score   = self.agent.session_score
             self.agent  = self._make_agent()
-            self.agent._memory   = old_memory
-            self.agent.messages  = old_msgs
+            self.agent._memory       = old_memory
+            self.agent.messages      = old_msgs
+            self.agent._turns        = old_turns
+            self.agent.session_score = old_score
             self.agent.messages[0]["content"] = self.agent._build_system()
             renderer.render_success(
                 f"👑 Boss 模式已开启\n"
@@ -869,9 +873,13 @@ class REPL:
             self._boss_mode = False
             old_memory = self.agent._memory
             old_msgs   = self.agent.messages
+            old_turns  = self.agent._turns
+            old_score  = self.agent.session_score
             self.agent = self._make_agent()
-            self.agent._memory  = old_memory
-            self.agent.messages = old_msgs
+            self.agent._memory       = old_memory
+            self.agent.messages      = old_msgs
+            self.agent._turns        = old_turns
+            self.agent.session_score = old_score
             self.agent.messages[0]["content"] = self.agent._build_system()
             renderer.render_info("Boss 模式已关闭，回到普通模式。")
         elif sub == "status":

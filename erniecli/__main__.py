@@ -1,9 +1,15 @@
 """ErnieCLI entry point."""
 import sys
 import argparse
+from importlib.metadata import version as _pkg_version, PackageNotFoundError
 from erniecli.config import load_config
 from erniecli.tui.logo import print_logo
 from erniecli.repl import REPL
+
+try:
+    _VERSION = _pkg_version("erniecli")
+except PackageNotFoundError:
+    _VERSION = "dev"
 
 
 def main():
@@ -16,7 +22,7 @@ def main():
     parser.add_argument("--model", "-m", metavar="MODEL", help="Override model name")
     parser.add_argument("--search", action="store_true", help="Enable web search")
     parser.add_argument("--image", "-i", metavar="PATH", help="Attach image (use with --ask)")
-    parser.add_argument("--version", action="version", version="ErnieCLI 1.0.0")
+    parser.add_argument("--version", action="version", version=f"ErnieCLI {_VERSION}")
     args = parser.parse_args()
 
     cfg = load_config()

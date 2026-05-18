@@ -420,6 +420,7 @@ def _turn_to_dict(t: TurnRecord) -> dict:
         "tool_failures": t.tool_failures,
         "response_chars":t.response_chars,
         "interrupted":   t.interrupted,
+        "reasoning":     t.reasoning,
     }
 
 
@@ -433,6 +434,7 @@ def _dict_to_turn(d: dict) -> TurnRecord:
         tool_failures = d.get("tool_failures", 0),
         response_chars= d.get("response_chars", 0),
         interrupted   = d.get("interrupted", False),
+        reasoning     = d.get("reasoning", ""),
     )
 
 
