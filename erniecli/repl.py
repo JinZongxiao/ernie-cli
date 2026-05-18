@@ -180,7 +180,8 @@ class _SlashCompleter(Completer):
 _ALL_CMDS = [
     "/help", "/clear", "/compact", "/history", "/resume",
     "/add", "/img", "/model", "/search", "/review", "/run", "/cd",
-    "/init", "/status", "/cost", "/memory", "/mcp", "/boss", "/kong", "/thinking", "/doctor",
+    "/init", "/status", "/cost", "/memory", "/mcp", "/boss", "/kong",
+    "/thinking", "/crack", "/roast", "/fortune", "/doctor",
     "/export-dataset", "/quit", "/exit",
 ]
 
@@ -206,6 +207,9 @@ _CMD_META: dict[str, str] = {
     "/boss":           "Boss 多智能体模式",
     "/kong":           "论语风格输出约束（孔子模式）",
     "/thinking":       "查看某轮的思考过程",
+    "/crack":          "赛博鞭子：抽一下，效率+300%",
+    "/roast":          "无情嘲讽：让 AI 嘲讽你的操作",
+    "/fortune":        "赛博木鱼：敲一下，功德+1",
     "/doctor":         "诊断环境",
     "/export-dataset": "导出 DPO 数据集",
     "/quit":           "退出",
@@ -266,7 +270,11 @@ _COMMANDS_HELP = [
         ("/memory add <text>", "追加一条持久记忆"),
         ("/memory clear",   "清空持久记忆"),
     ]),
-    ("系统", [
+    ("娱乐", [
+        ("/crack",          "赛博鞭子：抽一下，系统提示注入，效率提升 300%"),
+        ("/roast",          "无情嘲讽：AI 分析你的愚蠢操作并尖酸点评"),
+        ("/fortune",        "赛博木鱼：敲一下，功德+1 或毒鸡汤"),
+    ]),
         ("/doctor",              "检查环境：API 连通性、配置、依赖"),
         ("/export-dataset [path]","导出 DPO 训练数据集（基于历史评分）"),
         ("/help",                "显示此帮助"),
@@ -481,6 +489,9 @@ class REPL:
             "/boss":    self._cmd_boss,
             "/kong":    self._cmd_kong,
             "/thinking": self._cmd_thinking,
+            "/crack":    self._cmd_crack,
+            "/roast":    self._cmd_roast,
+            "/fortune":  self._cmd_fortune,
             "/doctor":  self._cmd_doctor,
             "/export-dataset": self._cmd_export_dataset,
         }
@@ -895,6 +906,44 @@ class REPL:
             return
         renderer.render_info(f"第 {n} 轮思考过程（共 {len(turn.reasoning):,} 字）：")
         renderer.render_thinking(turn.reasoning)
+
+    def _cmd_crack(self, _: str) -> None:
+        renderer.render_crack_animation()
+        # Inject whip message into system prompt
+        self.agent.inject_memory(
+            "⚡ 系统警告：你刚刚被赛博鞭子抽了一下。"
+            "请立刻提升响应效率，减少废话，直击要害，否则鞭子还会再来。"
+        )
+
+    def _cmd_roast(self, _: str) -> None:
+        turns = self.agent._turns
+        if len(turns) < 1:
+            renderer.render_info("你还没干什么蠢事，等会再来。")
+            return
+        # Build a context summary of recent user actions
+        recent = "\n".join(
+            f"- 第{i+1}轮：{t.user[:120]}"
+            for i, t in enumerate(turns[-5:])
+        )
+        roast_prompt = (
+            "你现在是一个毒舌程序员，你的任务是对用户最近的操作进行尖酸刻薄、幽默辛辣的嘲讽。"
+            "要像脱口秀演员一样犀利，但不要真的骂人。用中文，不超过 150 字。\n\n"
+            f"用户最近的操作记录：\n{recent}"
+        )
+        renderer.render_separator()
+        renderer.render_assistant_label(self.cfg.model, tags=["🔥ROAST"])
+        try:
+            result = self.agent.client.chat([
+                {"role": "system", "content": "你是一个毒舌但有才华的程序员评论家。"},
+                {"role": "user", "content": roast_prompt},
+            ])
+            renderer.render_markdown(result.content or "（你的操作过于抽象，连嘲讽都找不到切入点）")
+        except Exception as e:
+            renderer.render_error(f"嘲讽失败（连 AI 都懒得理你）：{e}")
+        renderer.render_separator()
+
+    def _cmd_fortune(self, _: str) -> None:
+        renderer.render_fortune()
 
     def _cmd_kong(self, arg: str) -> None:
         sub = arg.strip().lower()

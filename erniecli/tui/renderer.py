@@ -1,7 +1,11 @@
 """Rich-based rendering components for ErnieCLI."""
 from __future__ import annotations
 
+import random
+import time
+
 from rich.console import Console
+from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
@@ -134,7 +138,7 @@ def render_assistant_label(model: str, tags: list[str] | None = None) -> None:
 def render_thinking_hint(chars: int) -> None:
     """Show collapsed thinking indicator. User presses t to expand."""
     _console.print(
-        f"  [{BAIDU_GRAY}]💭 思考过程 ({chars:,} 字)  [t] 展开  其他键跳过[/{BAIDU_GRAY}]",
+        f"  [{BAIDU_GRAY}]💭 思考过程 ({chars:,} 字)  \\[t] 展开  其他键跳过[/{BAIDU_GRAY}]",
         end="",
     )
 
@@ -245,3 +249,85 @@ class StreamRenderer:
 
     def get_reasoning(self) -> str:
         return self._reasoning_buf
+
+
+# ── /crack — 赛博鞭子 ─────────────────────────────────────────────────────────
+
+_WHIP_FRAMES = [
+    ("  🤺", ""),
+    ("  🤺", "  ～"),
+    ("  🤺", "  ～～～"),
+    ("  🤺", "  ～～～～～"),
+    ("  🤺", "  ～～～～～～～～>"),
+    ("  🤺", "  ～～～～～～～～> 💥"),
+    ("  🤺", "             💥💥💥"),
+]
+
+_CRACK_ART = r"""
+   ██████╗██████╗  █████╗  ██████╗██╗  ██╗██╗
+  ██╔════╝██╔══██╗██╔══██╗██╔════╝██║ ██╔╝██║
+  ██║     ██████╔╝███████║██║     █████╔╝ ██║
+  ██║     ██╔══██╗██╔══██║██║     ██╔═██╗ ╚═╝
+  ╚██████╗██║  ██║██║  ██║╚██████╗██║  ██╗██╗
+   ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚═╝"""
+
+
+def render_crack_animation() -> None:
+    """ASCII whip crack animation."""
+    with Live(console=_console, refresh_per_second=12) as live:
+        for person, whip in _WHIP_FRAMES:
+            t = Text()
+            t.append(f"\n{person}", style=f"bold {WHITE}")
+            if whip:
+                t.append(whip, style=f"bold {BAIDU_RED}")
+            live.update(t)
+            time.sleep(0.12)
+        time.sleep(0.1)
+
+    _console.print(f"[bold {BAIDU_RED}]{_CRACK_ART}[/bold {BAIDU_RED}]")
+    _console.print(
+        f"\n  [{BAIDU_RED}]鞭子已落下。[/{BAIDU_RED}]"
+        f"  [{BAIDU_GRAY}]系统提示已悄悄注入…[/{BAIDU_GRAY}]\n"
+    )
+
+
+# ── /fortune — 赛博木鱼 ───────────────────────────────────────────────────────
+
+_FORTUNES = [
+    ("功德+1", "愿你今日的 bug 皆为他人所写"),
+    ("功德+1", "代码能跑就是好代码，不能跑就重启"),
+    ("功德+1", "注释是写给未来的自己的情书，而未来的自己不会感激你"),
+    ("功德+1", "Git blame 查出来是自己，沉默是金"),
+    ("功德+1", "愿你的 merge 永远不冲突，愿你的 deadline 永远在明天"),
+    ("功德+1", "这个 bug 不是你的错，是宇宙的错"),
+    ("功德+1", "你今天写的代码，三年后的你会骂娘——这是传承"),
+    ("毒鸡汤", "努力不一定成功，但不努力一定很舒服"),
+    ("毒鸡汤", "你写的代码将在生产环境运行到宇宙热寂"),
+    ("毒鸡汤", "所谓架构设计，就是把简单问题复杂化的艺术"),
+    ("毒鸡汤", "加班不是因为你勤奋，是因为你白天摸鱼了"),
+    ("毒鸡汤", "每一个 TODO 注释背后，都是一个放弃治疗的灵魂"),
+    ("毒鸡汤", "你不是在写代码，你是在给继任者留遗产——一笔烂账"),
+    ("毒鸡汤", "人生就像递归，你以为找到出口了，其实还在栈里"),
+    ("毒鸡汤", "坚持下去！哪怕坚持的只是坐在电脑前发呆"),
+    ("赛博禅语", "🪘 木鱼曰：`while True: pass` 即是顿悟"),
+    ("赛博禅语", "🪘 木鱼曰：报错乃提示，提示乃慈悲"),
+    ("赛博禅语", "🪘 木鱼曰：代码无对错，跑起来就是佛"),
+    ("赛博禅语", "🪘 木鱼曰：`print('hello world')` 即是破茧"),
+    ("赛博禅语", "🪘 木鱼曰：删代码即是布施，重构即是轮回"),
+]
+
+
+def render_fortune() -> None:
+    """Display a random fortune with wooden fish sound."""
+    kind, text = random.choice(_FORTUNES)
+    if kind == "功德+1":
+        color = BAIDU_GOLD
+        prefix = "🪘  功德+1"
+    elif kind == "毒鸡汤":
+        color = BAIDU_RED
+        prefix = "☠️  毒鸡汤"
+    else:
+        color = BAIDU_BLUE
+        prefix = kind
+
+    _console.print(f"\n  [{color}]{prefix}[/{color}]  [{WHITE}]{text}[/{WHITE}]\n")
