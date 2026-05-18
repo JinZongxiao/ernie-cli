@@ -35,6 +35,8 @@ class Config:
     worker_base_url: str = _DEFAULT_WORKER_BASE_URL
     # Harness — 论语风格输出约束
     harness_enabled: bool = False
+    # Tieba plan mode — custom personas
+    tieba_personas: list = field(default_factory=list)
 
     def validate(self) -> None:
         if not self.api_key:
@@ -81,6 +83,7 @@ def _apply_yaml(cfg: Config, data: dict) -> None:
         "worker_api_key":   "worker_api_key",
         "worker_base_url":  "worker_base_url",
         "harness_enabled":  "harness_enabled",
+        "tieba_personas":   None,   # handled separately (list)
     }
     for yaml_key, attr in mapping.items():
         if yaml_key in data and attr:
@@ -89,3 +92,5 @@ def _apply_yaml(cfg: Config, data: dict) -> None:
         cfg.history_path = Path(data["history_path"]).expanduser()
     if "mcp_servers" in data and isinstance(data["mcp_servers"], list):
         cfg.mcp_servers = data["mcp_servers"]
+    if "tieba_personas" in data and isinstance(data["tieba_personas"], list):
+        cfg.tieba_personas = data["tieba_personas"]

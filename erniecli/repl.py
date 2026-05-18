@@ -181,7 +181,7 @@ _ALL_CMDS = [
     "/help", "/clear", "/compact", "/history", "/resume",
     "/add", "/img", "/model", "/search", "/review", "/run", "/cd",
     "/init", "/status", "/cost", "/memory", "/mcp", "/boss", "/kong",
-    "/thinking", "/crack", "/roast", "/fortune", "/weekly", "/doctor",
+    "/thinking", "/crack", "/roast", "/fortune", "/weekly", "/tieba", "/doctor",
     "/export-dataset", "/quit", "/exit",
 ]
 
@@ -211,6 +211,7 @@ _CMD_META: dict[str, str] = {
     "/roast":          "无情嘲讽：让 AI 嘲讽你的操作",
     "/fortune":        "赛博木鱼：敲一下，功德+1",
     "/weekly":         "生成本工作周 Markdown 周报",
+    "/tieba":          "贴吧多智能体论战模式（🦅🐲🤡🐟💀 五大吧友 + 终结者方案）",
     "/doctor":         "诊断环境",
     "/export-dataset": "导出 DPO 数据集",
     "/quit":           "退出",
@@ -276,6 +277,11 @@ _COMMANDS_HELP = [
         ("/crack",          "赛博鞭子：抽一下，系统提示注入，效率提升 300%"),
         ("/roast",          "无情嘲讽：AI 分析你的愚蠢操作并尖酸点评"),
         ("/fortune",        "赛博木鱼：敲一下，功德+1 或毒鸡汤"),
+    ]),
+    ("贴吧模式 🔥", [
+        ("/tieba <话题>",   "进入多智能体贴吧讨论：5 个 AI 吧友围绕话题论战"),
+        ("",                "  🦅鹰眼·架构  🐲龙场·理论  🤡翻译官·类比  🐟摸鱼·气氛  💀老PTSD·血泪"),
+        ("",                "  @角色名 指定发言  /done 触发终结者整理方案"),
     ]),
     ("系统", [
         ("/doctor",              "检查环境：API 连通性、配置、依赖"),
@@ -496,6 +502,7 @@ class REPL:
             "/roast":    self._cmd_roast,
             "/fortune":  self._cmd_fortune,
             "/weekly":   self._cmd_weekly,
+            "/tieba":    self._cmd_tieba,
             "/doctor":  self._cmd_doctor,
             "/export-dataset": self._cmd_export_dataset,
         }
@@ -1109,6 +1116,17 @@ class REPL:
         # ── write to file ──────────────────────────────────────────────────────
         out_path.write_text(content, encoding="utf-8")
         renderer.render_success(f"周报已保存到：{out_path}  ({len(content)} 字符)")
+
+    def _cmd_tieba(self, arg: str) -> None:
+        """Enter Tieba multi-agent plan mode."""
+        from erniecli.tieba.personas import build_personas
+        from erniecli.tieba.loop import TiebaSession
+        try:
+            personas = build_personas(self.cfg.tieba_personas or [])
+            session = TiebaSession(self.agent.client, personas)
+            session.run()
+        except KeyboardInterrupt:
+            renderer.render_info("\n已退出贴吧模式。")
 
     def _cmd_doctor(self, _: str) -> None:
         import importlib
