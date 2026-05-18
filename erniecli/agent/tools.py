@@ -327,6 +327,37 @@ def execute_tool(name: str, args: dict[str, Any],
         return False, f"Tool error: {exc}", []
 
 
+# ── Diff helper ───────────────────────────────────────────────────────────────
+
+def _show_diff(old: str, new: str, path: str) -> None:
+    """Render a unified diff to the terminal via Rich."""
+    import difflib
+    from rich.syntax import Syntax
+    from erniecli.tui.renderer import get_console
+
+    diff_lines = list(difflib.unified_diff(
+        old.splitlines(keepends=True),
+        new.splitlines(keepends=True),
+        fromfile=f"a/{path}",
+        tofile=f"b/{path}",
+        lineterm="",
+    ))
+    if not diff_lines:
+        return
+    # cap to avoid flooding the terminal
+    MAX_DIFF_LINES = 60
+    truncated = len(diff_lines) > MAX_DIFF_LINES
+    shown = diff_lines[:MAX_DIFF_LINES]
+    diff_text = "".join(shown)
+    if truncated:
+        diff_text += f"\n… ({len(diff_lines) - MAX_DIFF_LINES} lines omitted)"
+
+    con = get_console()
+    con.print()
+    con.print(Syntax(diff_text, "diff", theme="monokai", line_numbers=False))
+    con.print()
+
+
 # ── Implementations ───────────────────────────────────────────────────────────
 
 def _read_file(path: str, start_line: int | None = None, end_line: int | None = None) -> tuple[bool, str]:
@@ -375,11 +406,21 @@ def _list_directory(path: str = ".", pattern: str | None = None) -> tuple[bool, 
 
 
 def _write_file(path: str, content: str, append: bool = False) -> tuple[bool, str]:
-    cmd = f"{'append to' if append else 'write'} {path}"
-    if not request_permission(PermLevel.WRITE, cmd):
+    p = Path(path).expanduser()
+    mode_label = "追加" if append else "写入"
+
+    # ── diff preview ─────────────────────────────────────────────────────────
+    if not append and p.exists():
+        old = p.read_text(errors="replace")
+        _show_diff(old, content, path)
+    else:
+        from erniecli.tui import renderer as _r
+        preview = content[:300] + ("…" if len(content) > 300 else "")
+        _r.render_info(f"新建文件 {path}，内容预览：\n{preview}")
+
+    if not request_permission(PermLevel.WRITE, f"{mode_label} {path}"):
         return False, "用户取消。"
 
-    p = Path(path).expanduser()
     p.parent.mkdir(parents=True, exist_ok=True)
     if append:
         with p.open("a") as f:
@@ -402,10 +443,13 @@ def _edit_file(path: str, old_string: str, new_string: str, replace_all: bool = 
     if count > 1 and not replace_all:
         return False, f"old_string 在文件中出现了 {count} 次，请提供更多上下文使其唯一，或设置 replace_all=true"
 
+    # ── diff preview ─────────────────────────────────────────────────────────
+    new_content = content.replace(old_string, new_string) if replace_all else content.replace(old_string, new_string, 1)
+    _show_diff(content, new_content, path)
+
     if not request_permission(PermLevel.WRITE, f"edit {path}"):
         return False, "用户取消。"
 
-    new_content = content.replace(old_string, new_string) if replace_all else content.replace(old_string, new_string, 1)
     p.write_text(new_content)
     replaced = count if replace_all else 1
     return True, f"已替换 {replaced} 处，文件已保存：{path}"
@@ -507,11 +551,36 @@ def _http_request(
 ) -> tuple[bool, str]:
     import urllib.request
     import urllib.error
+    import urllib.parse
 
     method = method.upper()
+
+    # ── permission classification ─────────────────────────────────────────────
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.hostname or ""
+    _PRIVATE = re.compile(
+        r"^(localhost|127\.\d+\.\d+\.\d+|0\.0\.0\.0"
+        r"|10\.\d+\.\d+\.\d+"
+        r"|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+"
+        r"|192\.168\.\d+\.\d+)$"
+    )
+    is_private = bool(_PRIVATE.match(host))
+    is_mutating = method in ("POST", "PUT", "PATCH", "DELETE")
+
+    if is_private:
+        level = PermLevel.DANGEROUS
+    elif is_mutating:
+        level = PermLevel.WRITE
+    else:
+        level = PermLevel.WRITE   # GET to public URL still needs one confirm
+
+    label = f"{method} {url}" + (" [内网地址！]" if is_private else "")
+    if not request_permission(level, label):
+        return False, "用户取消。"
+
     data = body.encode() if body else None
     req = urllib.request.Request(url, data=data, method=method)
-    req.add_header("User-Agent", "ErnieCLI/1.0")
+    req.add_header("User-Agent", "ErnieCLI/1.5")
     if headers:
         for k, v in headers.items():
             req.add_header(k, v)
