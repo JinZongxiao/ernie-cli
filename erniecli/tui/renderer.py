@@ -132,9 +132,17 @@ def render_assistant_label(model: str, tags: list[str] | None = None) -> None:
 
 
 def render_thinking_hint(chars: int) -> None:
-    """Show collapsed thinking indicator. User presses ↵ to expand."""
+    """Show collapsed thinking indicator. User presses t to expand."""
     _console.print(
-        f"  [{BAIDU_GRAY}]💭 思考过程 ({chars:,} 字)  ↵ 展开  其他键跳过[/{BAIDU_GRAY}]",
+        f"  [{BAIDU_GRAY}]💭 思考过程 ({chars:,} 字)  [t] 展开  其他键跳过[/{BAIDU_GRAY}]",
+        end="",
+    )
+
+
+def render_feedback_opt_in() -> None:
+    """Ask user once at startup whether to enable self-evolution feedback."""
+    _console.print(
+        f"  [{BAIDU_GRAY}]开启自进化反馈？每轮可打分，退出时评分  [y] 开启  其他键跳过[/{BAIDU_GRAY}]",
         end="",
     )
 

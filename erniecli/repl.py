@@ -44,7 +44,7 @@ _DIR_COMPLETER  = PathCompleter(only_directories=True)
 
 
 def _read_one_key() -> str:
-    """Read a single keypress without Enter. Returns 'up', 'down', 'enter', or ''."""
+    """Read a single keypress without Enter. Returns key name or the char itself."""
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
@@ -60,6 +60,9 @@ def _read_one_key() -> str:
                     return "up"
                 if ch3 == "B":
                     return "down"
+            return ""
+        if ch.isprintable():
+            return ch
         return ""
     except Exception:
         return ""
@@ -290,6 +293,7 @@ class REPL:
         self.agent = self._make_agent()
         self.console = renderer.get_console()
         self._pending_image: Optional[str] = None
+        self._feedback_enabled: bool = False
 
         _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
         self._session: PromptSession = PromptSession(
@@ -320,6 +324,16 @@ class REPL:
 
     def run(self) -> None:
         renderer.render_info(f"模型：{self.cfg.model}  |  Tab 补全命令  |  /help 查看帮助")
+
+        # one-time feedback opt-in
+        renderer.render_feedback_opt_in()
+        key = _read_one_key()
+        if key.lower() == "y":
+            self._feedback_enabled = True
+            self.console.print("  已开启")
+        else:
+            self.console.print()
+
         renderer.render_separator()
 
         while True:
@@ -330,7 +344,8 @@ class REPL:
                 continue
             except EOFError:
                 renderer.render_info("\n再见！")
-                self._run_session_score()
+                if self._feedback_enabled:
+                    self._run_session_score()
                 break
 
             if not user_input:
@@ -383,13 +398,13 @@ class REPL:
         if reasoning.strip():
             renderer.render_thinking_hint(len(reasoning))
             key = _read_one_key()
-            if key == "enter":
+            if key.lower() == "t":
                 renderer.render_thinking(reasoning)
             else:
                 self.console.print()  # newline after hint
 
-        # ── turn feedback ─────────────────────────────────────────────────────
-        if self.agent._turns:
+        # ── turn feedback (only if opted in) ─────────────────────────────────
+        if self._feedback_enabled and self.agent._turns:
             renderer.render_turn_feedback_hint()
             label = _read_one_key()
             if label in ("up", "down"):
@@ -472,6 +487,8 @@ class REPL:
 
         if verb in ("/quit", "/exit"):
             renderer.render_info("再见！")
+            if self._feedback_enabled:
+                self._run_session_score()
             return False
 
         handler = dispatch.get(verb)
