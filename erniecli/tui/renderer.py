@@ -146,7 +146,7 @@ def render_thinking_hint(chars: int) -> None:
 def render_feedback_opt_in() -> None:
     """Ask user once at startup whether to enable self-evolution feedback."""
     _console.print(
-        f"  [{BAIDU_GRAY}]开启自进化反馈？每轮可打分，退出时评分  [y] 开启  其他键跳过[/{BAIDU_GRAY}]",
+        f"  [{BAIDU_GRAY}]开启自进化反馈？每轮可打分，退出时评分  \\[y] 开启  其他键跳过[/{BAIDU_GRAY}]",
         end="",
     )
 

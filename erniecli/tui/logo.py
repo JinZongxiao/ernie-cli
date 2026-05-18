@@ -13,7 +13,7 @@ _ERNIE_LINES = [
     "╚══════╝╚═╝  ╚═╝╚═╝  ╚══╝╚═╝╚══════╝",
 ]
 
-_SUBTITLE = "Powered by Ernie 5.1  ·  v1.0.0"
+_SUBTITLE = "github.com/JinZongxiao/ernie-cli"
 _HINT     = "/help 查看命令  ·  Ctrl+C 退出"
 
 
