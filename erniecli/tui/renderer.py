@@ -115,6 +115,22 @@ def render_turn_feedback_hint() -> None:
     )
 
 
+def render_assistant_label(model: str, tags: list[str] | None = None) -> None:
+    """Print the Ernie speaker label before streaming begins."""
+    tag_str = ""
+    if tags:
+        tag_str = "  " + "  ".join(tags)
+    _console.print(
+        f"[{BAIDU_BLUE}][[/{BAIDU_BLUE}]"
+        f"[bold {BAIDU_BLUE}]Ernie[/bold {BAIDU_BLUE}]"
+        f"[{BAIDU_GRAY}] {model}[/{BAIDU_GRAY}]"
+        f"{tag_str}"
+        f"[{BAIDU_BLUE}]][/{BAIDU_BLUE}]"
+        f"[{BAIDU_BLUE}] ❯[/{BAIDU_BLUE}] ",
+        end="",
+    )
+
+
 def render_thinking_hint(chars: int) -> None:
     """Show collapsed thinking indicator. User presses ↵ to expand."""
     _console.print(

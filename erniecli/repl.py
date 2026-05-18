@@ -177,7 +177,7 @@ class _SlashCompleter(Completer):
 _ALL_CMDS = [
     "/help", "/clear", "/compact", "/history", "/resume",
     "/add", "/img", "/model", "/search", "/review", "/run", "/cd",
-    "/init", "/status", "/cost", "/memory", "/mcp", "/boss", "/kong", "/doctor",
+    "/init", "/status", "/cost", "/memory", "/mcp", "/boss", "/kong", "/thinking", "/doctor",
     "/export-dataset", "/quit", "/exit",
 ]
 
@@ -202,6 +202,7 @@ _CMD_META: dict[str, str] = {
     "/mcp":            "MCP servers",
     "/boss":           "Boss 多智能体模式",
     "/kong":           "论语风格输出约束（孔子模式）",
+    "/thinking":       "查看某轮的思考过程",
     "/doctor":         "诊断环境",
     "/export-dataset": "导出 DPO 数据集",
     "/quit":           "退出",
@@ -217,10 +218,11 @@ _PROMPT_STYLE = Style.from_dict({
 })
 
 _COMMANDS_HELP = [
-    ("对话与上下文", [
+    ("对话", [
         ("/clear",          "清空对话历史，重新开始"),
         ("/compact",        "用摘要替换历史消息，释放上下文空间"),
-        ("/history",        "查看本次会话消息记录"),
+        ("/history",        "查看本次会话消息记录，含思考过程提示"),
+        ("/thinking [N]",   "查看第 N 轮（默认最后一轮）的完整思考过程"),
         ("/resume",         "恢复当前目录上次保存的对话"),
         ("/add <path>",     "把文件/目录内容注入对话上下文"),
     ]),
@@ -463,6 +465,7 @@ class REPL:
             "/mcp":     self._cmd_mcp,
             "/boss":    self._cmd_boss,
             "/kong":    self._cmd_kong,
+            "/thinking": self._cmd_thinking,
             "/doctor":  self._cmd_doctor,
             "/export-dataset": self._cmd_export_dataset,
         }
@@ -519,6 +522,8 @@ class REPL:
         if not msgs:
             renderer.render_info("暂无历史消息。")
             return
+        # build turn index keyed by user text for reasoning lookup
+        turn_map = {t.user: t for t in self.agent._turns}
         for i, m in enumerate(msgs):
             role = "你" if m["role"] == "user" else ("Ernie" if m["role"] == "assistant" else "工具")
             content = m.get("content") or ""
@@ -526,6 +531,15 @@ class REPL:
                 content = next((p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"), "")
             snippet = (str(content)[:100] + "…") if len(str(content)) > 100 else str(content)
             self.console.print(f"  [dim]{i+1:>2}[/dim]  [bold]{role}[/bold]  {snippet}")
+            # show thinking hint if this is a user message with associated reasoning
+            if m["role"] == "user":
+                turn = turn_map.get(str(content))
+                if turn and turn.reasoning.strip():
+                    idx = self.agent._turns.index(turn)
+                    self.console.print(
+                        f"       [dim]💭 有思考过程 ({len(turn.reasoning):,} 字)  "
+                        f"/thinking {idx + 1} 查看[/dim]"
+                    )
 
     def _cmd_add(self, arg: str) -> None:
         if not arg:
@@ -846,6 +860,24 @@ class REPL:
             renderer.render_error(str(e))
         except Exception as e:
             renderer.render_error(f"导出失败：{e}")
+
+    def _cmd_thinking(self, arg: str) -> None:
+        turns = self.agent._turns
+        if not turns:
+            renderer.render_info("本次会话暂无记录。")
+            return
+        # parse turn index (1-based), default to last
+        try:
+            n = int(arg.strip()) if arg.strip() else len(turns)
+            turn = turns[n - 1]
+        except (ValueError, IndexError):
+            renderer.render_error(f"无效的轮次编号，共 {len(turns)} 轮（1 ~ {len(turns)}）")
+            return
+        if not turn.reasoning.strip():
+            renderer.render_info(f"第 {n} 轮没有思考过程记录。")
+            return
+        renderer.render_info(f"第 {n} 轮思考过程（共 {len(turn.reasoning):,} 字）：")
+        renderer.render_thinking(turn.reasoning)
 
     def _cmd_kong(self, arg: str) -> None:
         sub = arg.strip().lower()

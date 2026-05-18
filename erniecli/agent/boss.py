@@ -190,6 +190,8 @@ class BossLoop(AgentLoop):
         stream_renderer = renderer.StreamRenderer()
         result = None
 
+        renderer.render_assistant_label(self.cfg.model, tags=["👑BOSS"])
+
         gen = self.client.stream_chat(
             messages=self.messages,
             tools=_BOSS_TOOLS,

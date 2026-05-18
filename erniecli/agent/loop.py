@@ -281,6 +281,8 @@ class AgentLoop:
         stream_renderer = renderer.StreamRenderer()
         result: StreamResult | None = None
 
+        renderer.render_assistant_label(self.cfg.model)
+
         gen = self.client.stream_chat(
             messages=self.messages,
             tools=ALL_TOOLS,
