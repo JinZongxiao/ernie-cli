@@ -115,7 +115,7 @@ pip install -e .
 
 **核心原则：你不说话，吧里没人发言。每说一句，系统根据内容调度 1-3 个吧友回复。**
 
-八大常驻吧友（点击查看完整叠楼实录 → [🏟️ Demo](docs/tieba-demo.html)）：
+八大常驻吧友（点击查看完整叠楼实录 → [🏟️ Demo](https://jinzongxiao.github.io/ernie-cli/tieba-demo.html)）：
 
 | 角色 | 人设 | 触发时机 |
 |------|------|----------|

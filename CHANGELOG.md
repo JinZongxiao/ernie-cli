@@ -39,7 +39,7 @@
 | 🔰 门外汉小白 | 只问问题，等你解释 |
 | 🔧 运维老王 | 不配监控等死，默认怀疑你的方案 |
 
-[点这里看完整的叠楼实录 →](docs/tieba-demo.html)
+[点这里看完整的叠楼实录 →](https://jinzongxiao.github.io/ernie-cli/tieba-demo.html)
 
 > "把问题往吧里一扔，出来的不一定是最佳方案，但一定是最全面的考虑" — 某个被Redis击穿打死的工程师，2026
 
