@@ -151,7 +151,7 @@ class _SlashCompleter(Completer):
                         yield Completion(s, start_position=-len(cur))
             return
 
-        if verb == "/harness":
+        if verb == "/kong":
             if nargs == 1 or (nargs == 2 and not trailing_space):
                 cur = parts[1] if nargs == 2 else ""
                 for s in ("on", "off", "status"):
@@ -175,7 +175,7 @@ class _SlashCompleter(Completer):
 _ALL_CMDS = [
     "/help", "/clear", "/compact", "/history", "/resume",
     "/add", "/img", "/model", "/search", "/review", "/run", "/cd",
-    "/init", "/status", "/cost", "/memory", "/mcp", "/boss", "/harness", "/doctor",
+    "/init", "/status", "/cost", "/memory", "/mcp", "/boss", "/kong", "/doctor",
     "/export-dataset", "/quit", "/exit",
 ]
 
@@ -199,7 +199,7 @@ _CMD_META: dict[str, str] = {
     "/memory":         "持久记忆",
     "/mcp":            "MCP servers",
     "/boss":           "Boss 多智能体模式",
-    "/harness":        "论语风格输出约束",
+    "/kong":           "论语风格输出约束（孔子模式）",
     "/doctor":         "诊断环境",
     "/export-dataset": "导出 DPO 数据集",
     "/quit":           "退出",
@@ -249,10 +249,10 @@ _COMMANDS_HELP = [
         ("/boss on",        "开启 Boss 模式（Ernie 规划，Worker 执行）"),
         ("/boss off",       "关闭 Boss 模式，回到普通模式"),
     ]),
-    ("论语 Harness", [
-        ("/harness",        "查看 Harness 状态"),
-        ("/harness on",     "开启论语约束：言简、知之为知之、因材施教"),
-        ("/harness off",    "关闭论语约束，恢复默认输出风格"),
+    ("孔子模式", [
+        ("/kong",           "查看孔子模式状态"),
+        ("/kong on",        "开启论语约束：言简、知之为知之、因材施教"),
+        ("/kong off",       "关闭论语约束，恢复默认输出风格"),
     ]),
     ("记忆", [
         ("/memory",         "查看持久记忆（注入每次对话的系统提示）"),
@@ -446,7 +446,7 @@ class REPL:
             "/memory":  self._cmd_memory,
             "/mcp":     self._cmd_mcp,
             "/boss":    self._cmd_boss,
-            "/harness": self._cmd_harness,
+            "/kong":    self._cmd_kong,
             "/doctor":  self._cmd_doctor,
             "/export-dataset": self._cmd_export_dataset,
         }
@@ -831,7 +831,7 @@ class REPL:
         except Exception as e:
             renderer.render_error(f"导出失败：{e}")
 
-    def _cmd_harness(self, arg: str) -> None:
+    def _cmd_kong(self, arg: str) -> None:
         sub = arg.strip().lower()
         if sub == "on":
             self.agent.set_harness(True)
@@ -844,7 +844,7 @@ class REPL:
             if self.agent.harness_enabled:
                 renderer.render_info("📜 论语 Harness：开启")
             else:
-                renderer.render_info("论语 Harness：关闭  （/harness on 开启）")
+                renderer.render_info("论语 Harness：关闭  （/kong on 开启）")
 
     def _cmd_doctor(self, _: str) -> None:
         import importlib
