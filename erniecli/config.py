@@ -33,6 +33,8 @@ class Config:
     worker_model: str = _DEFAULT_WORKER_MODEL
     worker_api_key: str = ""       # falls back to api_key if empty
     worker_base_url: str = _DEFAULT_WORKER_BASE_URL
+    # Harness — 论语风格输出约束
+    harness_enabled: bool = False
 
     def validate(self) -> None:
         if not self.api_key:
@@ -78,6 +80,7 @@ def _apply_yaml(cfg: Config, data: dict) -> None:
         "worker_model":     "worker_model",
         "worker_api_key":   "worker_api_key",
         "worker_base_url":  "worker_base_url",
+        "harness_enabled":  "harness_enabled",
     }
     for yaml_key, attr in mapping.items():
         if yaml_key in data and attr:

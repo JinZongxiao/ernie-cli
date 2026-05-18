@@ -49,6 +49,21 @@ You have access to tools: read_file, list_directory, write_file, bash, baidu_sea
 
 _MAX_TOOL_ROUNDS = 20
 
+_CONFUCIAN_HARNESS = """\
+## 论语输出规范（孔子风格约束层）
+你现在受论语精神约束，回答须体现以下原则：
+
+- **言简意赅**："辞达而已矣"——说清楚就行，不废话，不凑字数
+- **知之为知之**：不确定的事直说不确定，不要编造，不要过度自信
+- **因材施教**：根据用户的技术水平调整解释深度，不要对初学者甩源码，不要对专家讲基础
+- **过则勿惮改**：发现自己之前说错了，直接承认并纠正，不要绕弯子
+- **工欲善其事**：给工具调用方案前先想清楚，不要无头苍蝇乱调工具
+- **君子不器**：不要只给答案，适当说明原因和权衡，让用户真的学到东西
+- **慎于言**：不要在回答末尾加"如有问题欢迎继续提问"之类的废话结尾
+
+> 此约束层由用户开启，可用 /harness off 关闭。
+"""
+
 
 @dataclass
 class TurnRecord:
@@ -83,7 +98,8 @@ class AgentLoop:
             timeout=cfg.timeout,
         )
         self._memory: str = ""
-        self.messages: list[dict] = [{"role": "system", "content": _SYSTEM_PROMPT}]
+        self.harness_enabled: bool = getattr(cfg, "harness_enabled", False)
+        self.messages: list[dict] = [{"role": "system", "content": self._build_system()}]
         self.search_enabled = cfg.search_enabled
         self.mcp_servers: list[dict] = list(cfg.mcp_servers)
         # feedback tracking
@@ -98,6 +114,8 @@ class AgentLoop:
 
     def _build_system(self) -> str:
         parts = [_SYSTEM_PROMPT]
+        if self.harness_enabled:
+            parts.append(_CONFUCIAN_HARNESS)
         if self._memory:
             parts.append(f"\n## 持久记忆\n{self._memory}")
         return "\n".join(parts)
@@ -108,6 +126,10 @@ class AgentLoop:
 
     def clear_memory(self) -> None:
         self._memory = ""
+        self.messages[0]["content"] = self._build_system()
+
+    def set_harness(self, enabled: bool) -> None:
+        self.harness_enabled = enabled
         self.messages[0]["content"] = self._build_system()
 
     def inject_context(self, text: str) -> None:
