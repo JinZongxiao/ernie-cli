@@ -181,7 +181,7 @@ _ALL_CMDS = [
     "/help", "/clear", "/compact", "/history", "/resume",
     "/add", "/img", "/model", "/search", "/review", "/run", "/cd",
     "/init", "/status", "/cost", "/memory", "/mcp", "/boss", "/kong",
-    "/thinking", "/crack", "/roast", "/fortune", "/doctor",
+    "/thinking", "/crack", "/roast", "/fortune", "/weekly", "/doctor",
     "/export-dataset", "/quit", "/exit",
 ]
 
@@ -210,6 +210,7 @@ _CMD_META: dict[str, str] = {
     "/crack":          "赛博鞭子：抽一下，效率+300%",
     "/roast":          "无情嘲讽：让 AI 嘲讽你的操作",
     "/fortune":        "赛博木鱼：敲一下，功德+1",
+    "/weekly":         "生成本工作周 Markdown 周报",
     "/doctor":         "诊断环境",
     "/export-dataset": "导出 DPO 数据集",
     "/quit":           "退出",
@@ -245,8 +246,9 @@ _COMMANDS_HELP = [
         ("/run <cmd>",      "直接执行 shell 命令并显示输出"),
         ("/cd <dir>",       "切换工作目录"),
     ]),
-    ("项目", [
+    ("项目与周报", [
         ("/init",           "在当前目录创建 ERNIE.md 项目说明文件"),
+        ("/weekly [path]",  "扫描本工作周改动文件，生成 Markdown 周报（默认保存到当前目录）"),
         ("/status",         "显示当前会话状态（模型、token 用量等）"),
         ("/cost",           "估算本次会话 token 用量与费用"),
     ]),
@@ -493,6 +495,7 @@ class REPL:
             "/crack":    self._cmd_crack,
             "/roast":    self._cmd_roast,
             "/fortune":  self._cmd_fortune,
+            "/weekly":   self._cmd_weekly,
             "/doctor":  self._cmd_doctor,
             "/export-dataset": self._cmd_export_dataset,
         }
@@ -960,6 +963,152 @@ class REPL:
                 renderer.render_info("📜 论语 Harness：开启")
             else:
                 renderer.render_info("论语 Harness：关闭  （/kong on 开启）")
+
+    def _cmd_weekly(self, arg: str) -> None:
+        """Scan current directory for files changed this work week, then generate a Markdown weekly report."""
+        import datetime
+        import stat
+
+        cwd = Path(os.getcwd())
+
+        # ── determine current work-week range (Mon 00:00 → today 23:59) ──────
+        today     = datetime.date.today()
+        monday    = today - datetime.timedelta(days=today.weekday())
+        week_start = datetime.datetime.combine(monday, datetime.time.min).timestamp()
+
+        renderer.render_info(f"扫描 {cwd} 中本工作周（{monday} 起）有修改的文件…")
+
+        # ── collect changed files ─────────────────────────────────────────────
+        IGNORE_DIRS = {
+            ".git", "__pycache__", ".venv", "venv", "env", "node_modules",
+            ".mypy_cache", ".pytest_cache", "dist", "build", ".tox", ".eggs",
+            "*.egg-info",
+        }
+        IGNORE_EXTS = {
+            ".pyc", ".pyo", ".pyd", ".so", ".o", ".a", ".lib",
+            ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".svg", ".webp",
+            ".mp4", ".mp3", ".wav", ".avi", ".mov",
+            ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z",
+            ".pdf", ".doc", ".docx", ".xls", ".xlsx",
+            ".bin", ".dat", ".db", ".sqlite", ".sqlite3",
+            ".lock",
+        }
+        MAX_FILES   = 80   # cap to avoid mega-prompts
+        MAX_PREVIEW = 200  # chars per file preview
+
+        changed: list[dict] = []
+
+        def _should_skip(p: Path) -> bool:
+            for part in p.parts:
+                if part in IGNORE_DIRS or part.endswith(".egg-info"):
+                    return True
+            return p.suffix.lower() in IGNORE_EXTS
+
+        for fpath in sorted(cwd.rglob("*")):
+            if not fpath.is_file():
+                continue
+            if _should_skip(fpath.relative_to(cwd)):
+                continue
+            try:
+                mtime = fpath.stat().st_mtime
+            except OSError:
+                continue
+            if mtime < week_start:
+                continue
+
+            rel = str(fpath.relative_to(cwd))
+            size = fpath.stat().st_size
+            # light preview for text files
+            preview = ""
+            try:
+                if size < 200_000:
+                    text = fpath.read_text(errors="replace")
+                    preview = text[:MAX_PREVIEW].replace("\n", " ↵ ")
+            except Exception:
+                preview = "(binary or unreadable)"
+
+            changed.append({
+                "path":    rel,
+                "mtime":   datetime.datetime.fromtimestamp(mtime).strftime("%m-%d %H:%M"),
+                "size":    size,
+                "preview": preview,
+            })
+
+            if len(changed) >= MAX_FILES:
+                break
+
+        if not changed:
+            renderer.render_info("本周（周一至今）没有找到有修改的文件。")
+            return
+
+        renderer.render_info(f"共找到 {len(changed)} 个改动文件，正在生成周报…")
+
+        # ── build prompt ──────────────────────────────────────────────────────
+        file_list = "\n".join(
+            f"- {f['path']}  [{f['mtime']}]  {f['size']} bytes\n  预览：{f['preview']}"
+            for f in changed
+        )
+
+        out_path_arg = arg.strip()
+        save_to_file = bool(out_path_arg)
+        out_path = Path(out_path_arg).expanduser() if save_to_file else \
+                   cwd / f"weekly-{today.strftime('%Y-%m-%d')}.md"
+
+        prompt = (
+            f"你是一名资深工程师，请根据以下本工作周（{monday} ~ {today}）修改过的文件列表，"
+            f"为项目 `{cwd.name}` 生成一份专业的中文周报，格式为 Markdown。\n\n"
+            "周报要求：\n"
+            "1. **本周工作概述** — 1~2 句话，概括整体方向\n"
+            "2. **主要工作内容** — 按模块/功能分组，每条说清楚做了什么、为什么\n"
+            "3. **文件变动统计** — 列出变动文件数、主要涉及哪些模块\n"
+            "4. **下周计划（可选）** — 根据文件变动推测可能的后续工作\n\n"
+            "注意：\n"
+            "- 不要罗列原始文件列表，要做真正的分析和归纳\n"
+            "- 如果文件名/路径能推断功能，直接在对应条目说明\n"
+            "- 风格简洁专业，不废话\n\n"
+            f"变动文件列表：\n{file_list}\n\n"
+            "直接输出 Markdown 内容，第一行是 # 标题（含日期），不要有任何额外解释。"
+        )
+
+        # ── call model and stream ─────────────────────────────────────────────
+        renderer.render_separator()
+        renderer.render_assistant_label(self.cfg.model, tags=["📝周报"])
+
+        weekly_messages = [
+            {"role": "system", "content": "你是一名资深工程师，专门负责撰写简洁专业的技术周报。"},
+            {"role": "user",   "content": prompt},
+        ]
+        stream_renderer = renderer.StreamRenderer()
+        content = ""
+        try:
+            gen = self.agent.client.stream_chat(
+                messages=weekly_messages,
+                tools=None,
+                search_enabled=False,
+                mcp_servers=None,
+            )
+            try:
+                while True:
+                    chunk_type, chunk_text = next(gen)
+                    if chunk_type != "reasoning":
+                        stream_renderer.feed_content(chunk_text)
+            except StopIteration as exc:
+                result = exc.value
+                stream_renderer.finish()
+                content = result.content or ""
+        except Exception as e:
+            renderer.render_error(f"生成失败：{e}")
+            return
+
+        renderer.render_separator()
+
+        if not content:
+            renderer.render_error("生成失败，AI 没有返回内容。")
+            return
+
+        # ── write to file ──────────────────────────────────────────────────────
+        out_path.write_text(content, encoding="utf-8")
+        renderer.render_success(f"周报已保存到：{out_path}  ({len(content)} 字符)")
 
     def _cmd_doctor(self, _: str) -> None:
         import importlib

@@ -14,7 +14,7 @@ ErnieCLI 是一个跑在终端里的 AI 编程 Agent，基于文心 Ernie 5.1，
          github.com/JinZongxiao/ernie-cli
 ```
 
-最新更新：🎭 娱乐三件套 · 💭 折叠思考 · 📊 自进化反馈优化 · 👑 Boss 模式 · 📜 孔子模式 → [CHANGELOG](CHANGELOG.md)
+最新更新：📅 周报生成 · 🎭 娱乐三件套 · 💭 折叠思考 · 📊 自进化反馈优化 · 👑 Boss 模式 → [CHANGELOG](CHANGELOG.md)
 
 ---
 
@@ -104,6 +104,7 @@ pip install -e .
 | 命令 | 说明 |
 |------|------|
 | `/init` | 分析当前项目，生成 ERNIE.md 说明文件 |
+| `/weekly [路径]` | 扫描本工作周改动文件，AI 分析生成 Markdown 周报，默认保存到当前目录 |
 | `/status` | 查看当前状态：模型、token 用量、存档情况 |
 | `/cost` | 估算本次对话 token 用量与费用 |
 
